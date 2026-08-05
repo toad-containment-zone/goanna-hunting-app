@@ -810,7 +810,7 @@
       list.innerHTML = '<div class="empty" id="emptyMsg">No searches recorded yet.</div>';
       return;
     }
-    list.innerHTML = records.slice().reverse().map(r => {
+    list.innerHTML = records.slice().reverse().slice(0, 5).map(r => {
       const badgeClass = r.status === 'synced' ? 'synced' : (r.status === 'failed' ? 'failed' : 'pending');
       const badgeText = r.status === 'synced' ? 'Synced' : (r.status === 'failed' ? 'Failed — tap to retry' : 'Queued');
       return `

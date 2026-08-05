@@ -265,19 +265,23 @@
     padding: 18px 0;
   }
 
-  .exportbtn {
+  .hidden { display: none !important; }
+
+  #startHuntBtn, #finishHuntBtn {
     width: 100%;
-    margin-top: 14px;
-    padding: 12px;
-    border-radius: 8px;
-    border: 1.5px solid var(--olive);
-    background: none;
-    color: var(--olive-dark);
+    padding: 16px;
+    border-radius: 10px;
+    border: none;
+    font-size: 16px;
     font-weight: 700;
-    font-size: 13.5px;
-    letter-spacing: 0.02em;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+    color: #fff;
     cursor: pointer;
   }
+  #startHuntBtn { background: var(--olive); }
+  #finishHuntBtn { background: var(--rock); margin-top: 14px; }
+  #startHuntBtn:active, #finishHuntBtn:active { transform: scale(0.98); }
 
   /* Modal / bottom sheets */
   .overlay {
@@ -462,30 +466,12 @@
   </div>
 
   <main>
-    <div class="card">
-      <h2>Site metadata &nbsp;(once per session)</h2>
-      <div class="row2">
-        <div class="field">
-          <label>Date</label>
-          <input type="date" id="metaDate">
-        </div>
-        <div class="field">
-          <label>Start time</label>
-          <input type="time" id="metaTime">
-        </div>
-      </div>
-      <div class="field">
-        <label>Location</label>
-        <input type="text" id="metaLocation" placeholder="e.g. Fitzroy River, Site 4">
-        <button class="locbtn" id="useGpsBtn">📍 Use current GPS coordinates</button>
-      </div>
-      <div class="field">
-        <label>Hunting team names</label>
-        <input type="text" id="metaTeam" placeholder="e.g. J. Nangala, T. Watson">
-      </div>
+    <div class="card" id="huntStartCard">
+      <button id="startHuntBtn">▶ Start hunting</button>
+      <div class="hint">Captures date, time and GPS location, then begins.</div>
     </div>
 
-    <div class="card">
+    <div class="card hidden" id="timerCard">
       <div class="timer-wrap">
         <div id="ring">
           <div>
@@ -503,7 +489,7 @@
       <div id="historyList">
         <div class="empty" id="emptyMsg">No searches recorded yet.</div>
       </div>
-      <button class="exportbtn" id="exportBtn">Export records as CSV</button>
+      <button class="hidden" id="finishHuntBtn">■ Finish hunting</button>
     </div>
   </main>
 
@@ -547,6 +533,11 @@
   <div class="sheet" id="settingsSheet">
     <h3>Sync settings</h3>
     <div class="sub">Point this app at your KoboToolbox or ODK Central form.</div>
+
+    <div class="field">
+      <label>Hunting team names</label>
+      <input type="text" id="cfgTeam" placeholder="e.g. J. Nangala, T. Watson">
+    </div>
 
     <div class="field">
       <label>Central app user code</label>
@@ -620,6 +611,7 @@
   let settings = {
     appUserCode: '',
     submissionUrl: '',
+    team: '',
     fieldMap: { ...defaultFieldMap }
   };
 
@@ -676,33 +668,51 @@
     catch (e) { console.warn('records save failed', e); }
   }
 
-  // ---------- metadata defaults ----------
-  const now = new Date();
-  $('metaDate').value = now.toISOString().slice(0,10);
-  $('metaTime').value = now.toTimeString().slice(0,5);
-
-  $('useGpsBtn').addEventListener('click', () => {
-    if (!navigator.geolocation) { alert('Location not available on this device.'); return; }
-    $('useGpsBtn').textContent = '📍 Locating…';
-    navigator.geolocation.getCurrentPosition(pos => {
-      const lat = pos.coords.latitude.toFixed(5);
-      const lon = pos.coords.longitude.toFixed(5);
-      $('metaLocation').value = lat + ', ' + lon;
-      $('useGpsBtn').textContent = '📍 Use current GPS coordinates';
-    }, () => {
-      $('useGpsBtn').textContent = '📍 Use current GPS coordinates';
-      alert('Could not get GPS location.');
-    });
-  });
+  // ---------- hunting session ----------
+  let huntingActive = false;
+  let sessionMeta = { date: '', startTime: '', location: '', team: '' };
 
   function currentMeta() {
-    return {
-      date: $('metaDate').value,
-      location: $('metaLocation').value,
-      team: $('metaTeam').value,
-      startTime: $('metaTime').value
-    };
+    return sessionMeta;
   }
+
+  function startHunting() {
+    const now = new Date();
+    sessionMeta = {
+      date: now.toISOString().slice(0,10),
+      startTime: now.toTimeString().slice(0,5),
+      location: '',
+      team: settings.team || ''
+    };
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(pos => {
+        sessionMeta.location = pos.coords.latitude.toFixed(5) + ', ' + pos.coords.longitude.toFixed(5);
+      }, () => { /* location stays blank if unavailable */ });
+    }
+    huntingActive = true;
+    $('huntStartCard').classList.add('hidden');
+    $('timerCard').classList.remove('hidden');
+    $('finishHuntBtn').classList.remove('hidden');
+  }
+
+  function endHuntingSession() {
+    huntingActive = false;
+    $('timerCard').classList.add('hidden');
+    $('finishHuntBtn').classList.add('hidden');
+    $('huntStartCard').classList.remove('hidden');
+  }
+
+  $('startHuntBtn').addEventListener('click', startHunting);
+
+  let finishPending = false;
+  $('finishHuntBtn').addEventListener('click', () => {
+    if (running) {
+      finishPending = true;
+      $('bigBtn').click();
+    } else {
+      endHuntingSession();
+    }
+  });
 
   // ---------- timer ----------
   let running = false;
@@ -790,6 +800,7 @@
     updateStatusBar();
     $('elapsed').textContent = '00:00';
     trySyncAll();
+    if (finishPending) { finishPending = false; endHuntingSession(); }
   });
 
   function renderHistory() {
@@ -822,25 +833,9 @@
     });
   }
 
-  // ---------- CSV export (local backup, independent of server sync) ----------
-  $('exportBtn').addEventListener('click', () => {
-    if (records.length === 0) { alert('No records to export yet.'); return; }
-    const header = ['Date','Location','Hunting team names','Start time','Record #','Duration (mm:ss)','People searching','Dug or inspected','What was found','Sync status'];
-    const rows = records.map(r => [r.meta.date, r.meta.location, r.meta.team, r.meta.startTime, r.n, r.duration, r.people, r.dig, r.found, r.status]);
-    const csv = [header, ...rows].map(row => row.map(v => `"${String(v).replace(/"/g,'""')}"`).join(',')).join('\n');
-    const blob = new Blob([csv], {type: 'text/csv'});
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `goanna_records_${(records[0]||{}).meta?.date || 'export'}.csv`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-  });
-
   // ---------- Settings sheet ----------
   function populateSettingsForm() {
+    $('cfgTeam').value = settings.team || '';
     $('cfgUrl').value = settings.appUserCode || settings.submissionUrl;
     Object.keys(defaultFieldMap).forEach(key => {
       const el = document.querySelector(`.mapfield input[data-key="${key}"]`);
@@ -862,6 +857,7 @@
       alert(err.message);
       return;
     }
+    settings.team = $('cfgTeam').value.trim();
     settings.appUserCode = rawInput;
     settings.submissionUrl = resolvedUrl;
     document.querySelectorAll('.mapfield input[data-key]').forEach(el => {
@@ -872,8 +868,13 @@
     trySyncAll();
   });
 
-  [$('overlay'), $('settingsOverlay')].forEach(ov => {
-    ov.addEventListener('click', (e) => { if (e.target === ov) ov.classList.remove('show'); });
+  $('overlay').addEventListener('click', (e) => {
+    if (e.target !== $('overlay')) return;
+    $('overlay').classList.remove('show');
+    if (finishPending) { finishPending = false; endHuntingSession(); }
+  });
+  $('settingsOverlay').addEventListener('click', (e) => {
+    if (e.target === $('settingsOverlay')) $('settingsOverlay').classList.remove('show');
   });
 
   // ---------- QR code scanning (Central app user code) ----------

@@ -34,25 +34,37 @@ commented sections (search for the `// ---------- ... ----------` markers):
    `general.server_url` and append `/submission`. The raw pasted value is kept as
    `settings.appUserCode` so the field can be repopulated; the derived endpoint is
    `settings.submissionUrl`, which is what actually gets POSTed to.
-2. **Metadata capture** — date/time/location/team fields, filled once per session, attached to
-   every record via `currentMeta()`. GPS lookup uses `navigator.geolocation`.
+2. **Hunting session** — there's no per-session metadata form. Tapping **Start hunting**
+   (`startHunting()`) stamps `sessionMeta` (date/startTime from `new Date()`, `team` from
+   `settings.team`) and kicks off a non-blocking `navigator.geolocation.getCurrentPosition()` call
+   that fills in `sessionMeta.location` whenever it resolves (left blank if GPS fails — there's no
+   manual override anymore). `currentMeta()` just returns `sessionMeta`, and it's attached to every
+   record. `huntingActive` gates which card is visible (`#huntStartCard` vs `#timerCard`); team
+   name is captured once in Settings instead, since it rarely changes between sessions.
 3. **Timer** — a simple start/stop stopwatch (`running`, `startTs`, `tick()` on a 250ms interval)
    that measures burrow time-to-detection. Stopping opens the record-entry bottom sheet.
 4. **Record lifecycle** — each search produces a record object with a `status` of
    `pending → synced` or `failed`. Records are pushed to `records`, saved to `localStorage`
    immediately, then a sync is attempted. Tapping a non-synced record in the history list retries
-   it individually via `submitOne()`.
+   it individually via `submitOne()`. **Finish hunting** (`#finishHuntBtn`) ends the session: if a
+   search is still running it simulates a `#bigBtn` click first (same stop → record-sheet flow as
+   normal) via the `finishPending` flag, then calls `endHuntingSession()` once that sheet closes
+   (saved or cancelled) to flip the UI back to `#huntStartCard`.
 5. **XForms/OpenRosa submission** — `buildSubmissionXml(rec)` renders a record as an OpenRosa XML
    instance using `settings.fieldMap` (defaults in `defaultFieldMap`) to map internal field names
    to the target form's XML element names. `submitOne()` POSTs it as `xml_submission_file` in a
-   `multipart/form-data` body with HTTP Basic auth, matching the ODK Central / KoboToolbox
-   submission API contract.
+   `multipart/form-data` body, matching the ODK Central / KoboToolbox submission API contract.
+   Auth is carried in the URL itself (see the app-user-code note above) — there's no separate
+   username/password.
 6. **Sync orchestration** — `trySyncAll()` walks all non-synced records and submits them
    sequentially; it's triggered on save, on manual "Sync now", on the `online` browser event, and
    on a 30s interval. `updateStatusBar()` reflects online/offline state and pending count in the
    header status bar.
-7. **CSV export** — `exportBtn` produces a local CSV backup of all records, independent of the
-   server sync path (useful when no submission URL is configured yet, or as a paper-trail backup).
+7. **QR code scanning** — jsQR v1.4.0 is vendored inline (minified, own `<script>` block, Apache
+   2.0, attributed at the top of the block) rather than using the native `BarcodeDetector` API,
+   because Safari/iOS doesn't implement `BarcodeDetector` and field crews use a mix of Android and
+   iPhone devices. `startScan()`/`scanTick()` grab camera frames onto a canvas and feed them to the
+   global `jsQR()` to populate the Central app user code field.
 
 ### Settings sheet field mapping
 

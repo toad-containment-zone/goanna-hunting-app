@@ -516,20 +516,6 @@
       <label>Central app user code</label>
       <input type="text" id="cfgUrl" placeholder="Paste the code from Central's App User page, or a full submission URL">
     </div>
-    <div class="row2">
-      <div class="field">
-        <label>Username</label>
-        <input type="text" id="cfgUser" placeholder="field-team">
-      </div>
-      <div class="field">
-        <label>Password / token</label>
-        <input type="password" id="cfgPass" placeholder="••••••••">
-      </div>
-    </div>
-    <div class="field">
-      <label>Form ID (xmlFormId)</label>
-      <input type="text" id="cfgFormId" placeholder="goanna_burrow_detection">
-    </div>
 
     <div class="settingsNote">
       Records are always saved on this phone first. When you're back in signal, tap
@@ -537,8 +523,8 @@
       your Kobo/ODK Central form as standard XForms submissions.
       <br><br>
       For ODK Central: on the app user's page, copy the long code shown under "QR code" /
-      "Configure a client with this code" and paste it above — the submission address is
-      built from it automatically. Username/password aren't needed with an app user code.
+      "Configure a client with this code" and paste it above — the submission address and
+      credentials are built from it automatically.
     </div>
 
     <details class="adv">
@@ -575,12 +561,11 @@
     found: 'what_did_you_find'
   };
 
+  const FORM_ID = 'goanna_burrow_detection';
+
   let settings = {
     appUserCode: '',
     submissionUrl: '',
-    username: '',
-    password: '',
-    formId: 'goanna_burrow_detection',
     fieldMap: { ...defaultFieldMap }
   };
 
@@ -803,9 +788,6 @@
   // ---------- Settings sheet ----------
   function populateSettingsForm() {
     $('cfgUrl').value = settings.appUserCode || settings.submissionUrl;
-    $('cfgUser').value = settings.username;
-    $('cfgPass').value = settings.password;
-    $('cfgFormId').value = settings.formId;
     Object.keys(defaultFieldMap).forEach(key => {
       const el = document.querySelector(`.mapfield input[data-key="${key}"]`);
       if (el) el.value = settings.fieldMap[key] || defaultFieldMap[key];
@@ -828,9 +810,6 @@
     }
     settings.appUserCode = rawInput;
     settings.submissionUrl = resolvedUrl;
-    settings.username = $('cfgUser').value.trim();
-    settings.password = $('cfgPass').value;
-    settings.formId = $('cfgFormId').value.trim() || 'goanna_burrow_detection';
     document.querySelectorAll('.mapfield input[data-key]').forEach(el => {
       settings.fieldMap[el.dataset.key] = el.value.trim() || defaultFieldMap[el.dataset.key];
     });
@@ -852,7 +831,7 @@
 
   function buildSubmissionXml(rec) {
     const m = settings.fieldMap;
-    const root = settings.formId || 'data';
+    const root = FORM_ID;
     const instanceId = 'uuid:' + rec.id;
     return `<?xml version="1.0" encoding="UTF-8"?>
 <${root} id="${root}">
@@ -884,10 +863,6 @@
       fd.append('xml_submission_file', blob, `${rec.id}.xml`);
 
       const headers = { 'X-OpenRosa-Version': '1.0' };
-      if (settings.username) {
-        headers['Authorization'] = 'Basic ' + btoa(`${settings.username}:${settings.password}`);
-      }
-
       const res = await fetch(settings.submissionUrl, { method: 'POST', headers, body: fd });
       if (res.ok || res.status === 201 || res.status === 202) {
         rec.status = 'synced';

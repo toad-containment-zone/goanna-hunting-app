@@ -4,9 +4,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-A single-file, no-build, offline-first field data collection tool for cane toad hunters (Toad
-Containment Zone / TCZ program) timing how long it takes to detect a goanna at a burrow, then
-syncing the records to a KoboToolbox or ODK Central form.
+A no-build, offline-first field data collection tool for cane toad hunters (Toad Containment Zone
+/ TCZ program) timing how long it takes to detect a goanna at a burrow, then syncing the records
+to a KoboToolbox or ODK Central form. The app itself is one HTML file; two small PWA support files
+sit alongside it so it's installable and works with zero signal (see "PWA shell" below).
 
 - `goanna-hunting-app.html` — the entire application: HTML, CSS, and vanilla JS in one file, no
   dependencies, no bundler, no package.json.
@@ -14,10 +15,15 @@ syncing the records to a KoboToolbox or ODK Central form.
   defining the KoboToolbox/ODK Central form that the app submits to. Field names in this workbook
   must line up with `defaultFieldMap` in the HTML's `<script>` (see below) — if one changes, the
   other needs to change too.
+- `manifest.json` / `sw.js` — web app manifest and service worker that make the app installable
+  and precache the shell for offline use. See "PWA shell" below before touching these.
 
-There is no build step, package manager, linter, or test suite. "Running" the app means opening
-`goanna-hunting-app.html` directly in a browser (or serving it statically, e.g. `python3 -m http.server`).
-Verify changes by opening it in a browser and exercising the flow — there is no automated test to lean on.
+There is no build step, package manager, linter, or test suite. "Running" the app means serving
+the directory statically (e.g. `python3 -m http.server`) and opening `goanna-hunting-app.html` —
+the service worker requires a real HTTP(S) origin (or `localhost`) and won't register over a bare
+`file://` URL, so a static server is needed to test the offline/install behavior, not just the app
+logic. Verify changes by opening it in a browser and exercising the flow — there is no automated
+test to lean on.
 
 ## Architecture
 
@@ -66,6 +72,26 @@ commented sections (search for the `// ---------- ... ----------` markers):
    iPhone devices. `startScan()`/`scanTick()` grab camera frames onto a canvas and feed them to the
    global `jsQR()` to populate the Central app user code field.
 
+### PWA shell (`manifest.json`, `sw.js`)
+
+The app is registered as a service worker (`navigator.serviceWorker.register('sw.js')`, near the
+top of the main `<script>` block) so it opens instantly and works offline even on first launch
+after being added to the home screen — important since it's used in areas with no signal. `sw.js`
+precaches `goanna-hunting-app.html` and `manifest.json` on install, then serves from cache on every
+load while updating the cache in the background (stale-while-revalidate) so it stays current
+whenever there *is* signal without ever blocking on the network. This only covers the app shell
+loading — the actual record sync to ODK Central still needs connectivity, which is what the
+existing pending/sync-queue UI already handles.
+
+`manifest.json`'s icon (and the `<link rel="apple-touch-icon">` in the HTML `<head>`, for iOS,
+which doesn't use the manifest for "Add to Home Screen") is a generated 512×512 PNG: the header
+logo centered on an olive (`#838851`) square background, embedded as a `data:` URI so no extra
+image files are needed on disk. Regenerate it (via Pillow or similar) if the logo changes; don't
+hand-edit the base64.
+
+Bump `CACHE_NAME` in `sw.js` whenever you change what needs to be cached — it's also how old
+caches get cleaned up on `activate`.
+
 ### Settings sheet field mapping
 
 The "Advanced" section of the settings sheet (`.mapfield` inputs, `data-key` attributes) lets a
@@ -83,9 +109,11 @@ Layout is a single-column mobile app shell (`#app`, max-width 460px) with bottom
 
 ## Notes for editing
 
-- Keep it a single self-contained HTML file unless explicitly asked to split it up — that's the
-  deployment model (opened directly on a phone browser, no server required beyond the KoboToolbox/
-  ODK Central endpoint it syncs to).
+- Keep the *application* in the single `goanna-hunting-app.html` file — no dependencies, no
+  bundler — unless explicitly asked to split it up. `manifest.json` and `sw.js` are the one
+  sanctioned exception: browsers refuse to register a service worker from a `blob:`/`data:` URL,
+  so they can't be inlined and have to ship as real files next to the HTML. Everything else
+  (jsQR, the logo, the generated app icon) stays embedded inline as before.
 - The large base64 data URI in the `<header><img>` tag is an embedded logo image — leave it alone
   unless the logo itself needs to change.
 - `crypto.randomUUID()` is used for record IDs (with a fallback for older browsers) and doubles as

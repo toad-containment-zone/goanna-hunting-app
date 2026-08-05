@@ -6,8 +6,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 A no-build, offline-first field data collection tool for cane toad hunters (Toad Containment Zone
 / TCZ program) timing how long it takes to detect a goanna at a burrow, then syncing the records
-to a KoboToolbox or ODK Central form. The app itself is one HTML file; two small PWA support files
-sit alongside it so it's installable and works with zero signal (see "PWA shell" below).
+to a KoboToolbox or ODK Central form. The app itself is one HTML file; a few small support files
+sit alongside it so it's installable, works with zero signal, and has a clean URL when hosted on
+GitHub Pages (see "PWA shell" below).
 
 - `goanna-hunting-app.html` — the entire application: HTML, CSS, and vanilla JS in one file, no
   dependencies, no bundler, no package.json.
@@ -17,6 +18,9 @@ sit alongside it so it's installable and works with zero signal (see "PWA shell"
   other needs to change too.
 - `manifest.json` / `sw.js` — web app manifest and service worker that make the app installable
   and precache the shell for offline use. See "PWA shell" below before touching these.
+- `index.html` — a bare redirect to `goanna-hunting-app.html`, so the site's root URL (e.g. GitHub
+  Pages' `https://<org>.github.io/<repo>/`) works without visitors needing to know or type the
+  actual filename. It carries no app logic of its own.
 
 There is no build step, package manager, linter, or test suite. "Running" the app means serving
 the directory statically (e.g. `python3 -m http.server`) and opening `goanna-hunting-app.html` —
@@ -72,16 +76,18 @@ commented sections (search for the `// ---------- ... ----------` markers):
    iPhone devices. `startScan()`/`scanTick()` grab camera frames onto a canvas and feed them to the
    global `jsQR()` to populate the Central app user code field.
 
-### PWA shell (`manifest.json`, `sw.js`)
+### PWA shell (`manifest.json`, `sw.js`, `index.html`)
 
 The app is registered as a service worker (`navigator.serviceWorker.register('sw.js')`, near the
 top of the main `<script>` block) so it opens instantly and works offline even on first launch
 after being added to the home screen — important since it's used in areas with no signal. `sw.js`
-precaches `goanna-hunting-app.html` and `manifest.json` on install, then serves from cache on every
-load while updating the cache in the background (stale-while-revalidate) so it stays current
-whenever there *is* signal without ever blocking on the network. This only covers the app shell
-loading — the actual record sync to ODK Central still needs connectivity, which is what the
-existing pending/sync-queue UI already handles.
+precaches `./`, `index.html`, `goanna-hunting-app.html`, and `manifest.json` on install, then
+serves from cache on every load while updating the cache in the background (stale-while-revalidate)
+so it stays current whenever there *is* signal without ever blocking on the network. `index.html`
+is precached too (not just `goanna-hunting-app.html`) so the bare root URL still resolves offline
+for anyone who bookmarked or installed from `/` instead of the direct filename. This only covers
+the app shell loading — the actual record sync to ODK Central still needs connectivity, which is
+what the existing pending/sync-queue UI already handles.
 
 `manifest.json`'s icon (and the `<link rel="apple-touch-icon">` in the HTML `<head>`, for iOS,
 which doesn't use the manifest for "Add to Home Screen") is a generated 512×512 PNG: the header

@@ -3,8 +3,8 @@
 // fetch on every load keeps the cache fresh for next time (stale-while-revalidate).
 // The app itself still needs a live connection to sync records to ODK Central —
 // this only covers the app shell loading, not the sync path.
-const CACHE_NAME = 'tcz-goanna-shell-v1';
-const APP_SHELL = ['./goanna-hunting-app.html', './manifest.json'];
+const CACHE_NAME = 'tcz-goanna-shell-v2';
+const APP_SHELL = ['./', './index.html', './goanna-hunting-app.html', './manifest.json'];
 
 self.addEventListener('install', (event) => {
   event.waitUntil(

@@ -4,7 +4,7 @@ A field app for the Toad Containment Zone (TCZ) program: times how long it takes
 goanna at a burrow, then syncs the records to our KoboToolbox/ODK Central form. Works fully
 offline once installed — no signal needed out in the field.
 
-**App URL:** https://popbiolgen.github.io/goanna-hunting-app/
+**App URL:** [https://toad-containment-zone.github.io/goanna-hunting-app/goanna-hunting-app.html]
 
 ## Setup (do this once)
 

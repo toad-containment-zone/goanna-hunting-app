@@ -354,6 +354,21 @@
   }
   .toggle2 button.active.yes { border-color: var(--dirt); color: var(--dirt); background: #fff3ee; }
   .toggle2 button.active.no { border-color: var(--olive); color: var(--olive-dark); background: #f1f2e9; }
+  .chkgroup { display: flex; flex-direction: column; gap: 6px; }
+  .chkopt {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 14px;
+    color: var(--text);
+    padding: 8px 10px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: #fff;
+    cursor: pointer;
+  }
+  .chkopt input { width: 17px; height: 17px; accent-color: var(--olive); }
+  #foundOtherText { margin-top: 8px; }
   #saveBtn, #saveSettingsBtn {
     width: 100%;
     margin-top: 18px;
@@ -366,36 +381,6 @@
     font-size: 15px;
     letter-spacing: 0.02em;
     cursor: pointer;
-  }
-  details.adv {
-    margin-top: 14px;
-    border-top: 1px solid var(--line);
-    padding-top: 12px;
-  }
-  details.adv summary {
-    font-size: 12.5px;
-    font-weight: 700;
-    color: var(--olive-dark);
-    cursor: pointer;
-  }
-  details.adv .mapfield {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    margin-top: 8px;
-  }
-  details.adv .mapfield span {
-    width: 42%;
-    font-size: 11.5px;
-    color: var(--muted);
-  }
-  details.adv .mapfield input {
-    flex: 1;
-    border: 1px solid var(--line);
-    border-radius: 6px;
-    padding: 6px 8px;
-    font-size: 13px;
-    font-family: monospace;
   }
   .settingsNote {
     font-size: 11.5px;
@@ -525,9 +510,16 @@
       </div>
     </div>
 
-    <div class="field">
+    <div class="field hidden" id="foundFieldWrap">
       <label>What did you find?</label>
-      <textarea id="foundText" placeholder="e.g. Active burrow, fresh diggings, no goanna present"></textarea>
+      <div class="chkgroup">
+        <label class="chkopt"><input type="checkbox" class="foundChk" value="nothing"> Nothing</label>
+        <label class="chkopt"><input type="checkbox" class="foundChk" value="goanna"> Goanna</label>
+        <label class="chkopt"><input type="checkbox" class="foundChk" value="bluetongue"> Bluetongue</label>
+        <label class="chkopt"><input type="checkbox" class="foundChk" value="king_brown"> King Brown</label>
+        <label class="chkopt"><input type="checkbox" class="foundChk" value="other"> Other</label>
+      </div>
+      <input type="text" id="foundOtherText" class="hidden" placeholder="Please specify">
     </div>
 
     <button id="saveBtn">Save record</button>
@@ -562,19 +554,6 @@
       automatically.
     </div>
 
-    <details class="adv">
-      <summary>Advanced — match your form's field names</summary>
-      <div class="mapfield"><span>Date</span><input id="map_date" data-key="date"></div>
-      <div class="mapfield"><span>Location</span><input id="map_location" data-key="location"></div>
-      <div class="mapfield"><span>Hunting team names</span><input id="map_team" data-key="team"></div>
-      <div class="mapfield"><span>Start time</span><input id="map_startTime" data-key="startTime"></div>
-      <div class="mapfield"><span>Record #</span><input id="map_recordNumber" data-key="recordNumber"></div>
-      <div class="mapfield"><span>Duration (sec)</span><input id="map_durationSeconds" data-key="durationSeconds"></div>
-      <div class="mapfield"><span>People searching</span><input id="map_peopleSearching" data-key="peopleSearching"></div>
-      <div class="mapfield"><span>Dig / inspect</span><input id="map_digInspect" data-key="digInspect"></div>
-      <div class="mapfield"><span>What found</span><input id="map_found" data-key="found"></div>
-    </details>
-
     <button id="saveSettingsBtn">Save settings</button>
   </div>
 </div>
@@ -607,33 +586,35 @@
   const STORAGE_KEY = 'tcz_goanna_records_v1';
   const SETTINGS_KEY = 'tcz_goanna_settings_v1';
 
-  const defaultFieldMap = {
+  const FIELD_MAP = {
     date: 'date',
-    location: 'location',
+    locationLat: 'location_lat',
+    locationLon: 'location_lon',
     team: 'hunting_team_names',
     startTime: 'start_time',
     recordNumber: 'record_number',
     durationSeconds: 'duration_seconds',
     peopleSearching: 'people_searching',
     digInspect: 'dig_or_inspect',
-    found: 'what_did_you_find'
+    found: 'what_did_you_find',
+    foundOther: 'what_did_you_find_other'
   };
+
+  const FOUND_LABELS = { nothing: 'Nothing', goanna: 'Goanna', bluetongue: 'Bluetongue', king_brown: 'King Brown', other: 'Other' };
 
   const FORM_ID = 'goanna_burrow_detection';
 
   let settings = {
     appUserCode: '',
     submissionUrl: '',
-    team: '',
-    fieldMap: { ...defaultFieldMap }
+    team: ''
   };
 
   function loadSettings() {
     try {
       const raw = localStorage.getItem(SETTINGS_KEY);
       if (raw) {
-        const parsed = JSON.parse(raw);
-        settings = { ...settings, ...parsed, fieldMap: { ...defaultFieldMap, ...(parsed.fieldMap || {}) } };
+        settings = { ...settings, ...JSON.parse(raw) };
       }
     } catch (e) { console.warn('settings load failed', e); }
   }
@@ -683,7 +664,7 @@
 
   // ---------- hunting session ----------
   let huntingActive = false;
-  let sessionMeta = { date: '', startTime: '', location: '', team: '' };
+  let sessionMeta = { date: '', startTime: '', locationLat: null, locationLon: null, team: '' };
 
   function currentMeta() {
     return sessionMeta;
@@ -694,12 +675,14 @@
     sessionMeta = {
       date: now.toISOString().slice(0,10),
       startTime: now.toTimeString().slice(0,5),
-      location: '',
+      locationLat: null,
+      locationLon: null,
       team: settings.team || ''
     };
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(pos => {
-        sessionMeta.location = pos.coords.latitude.toFixed(5) + ', ' + pos.coords.longitude.toFixed(5);
+        sessionMeta.locationLat = +pos.coords.latitude.toFixed(5);
+        sessionMeta.locationLon = +pos.coords.longitude.toFixed(5);
       }, () => { /* location stays blank if unavailable */ });
     }
     huntingActive = true;
@@ -776,7 +759,10 @@
     people = 1; $('peopleVal').textContent = people;
     digVal = null;
     document.querySelectorAll('.digBtn').forEach(b => b.classList.remove('active','yes','no'));
-    $('foundText').value = '';
+    document.querySelectorAll('.foundChk').forEach(c => c.checked = false);
+    $('foundOtherText').value = '';
+    $('foundOtherText').classList.add('hidden');
+    $('foundFieldWrap').classList.add('hidden');
     $('overlay').classList.add('show');
   }
 
@@ -788,11 +774,31 @@
       document.querySelectorAll('.digBtn').forEach(b => b.classList.remove('active','yes','no'));
       digVal = btn.dataset.val;
       btn.classList.add('active', digVal === 'Yes' ? 'yes' : 'no');
+      if (digVal === 'Yes') {
+        $('foundFieldWrap').classList.remove('hidden');
+      } else {
+        $('foundFieldWrap').classList.add('hidden');
+        document.querySelectorAll('.foundChk').forEach(c => c.checked = false);
+        $('foundOtherText').value = '';
+        $('foundOtherText').classList.add('hidden');
+      }
+    });
+  });
+
+  document.querySelectorAll('.foundChk').forEach(chk => {
+    chk.addEventListener('change', () => {
+      if (chk.value !== 'other') return;
+      $('foundOtherText').classList.toggle('hidden', !chk.checked);
+      if (!chk.checked) $('foundOtherText').value = '';
     });
   });
 
   $('saveBtn').addEventListener('click', () => {
     if (!digVal) { alert('Please select whether the burrow was dug or inspected.'); return; }
+    const found = digVal === 'Yes'
+      ? Array.from(document.querySelectorAll('.foundChk:checked')).map(c => c.value)
+      : [];
+    const foundOther = digVal === 'Yes' ? $('foundOtherText').value.trim() : '';
     const rec = {
       id: (crypto.randomUUID ? crypto.randomUUID() : 'id-' + Date.now() + '-' + Math.random().toString(16).slice(2)),
       n: records.length + 1,
@@ -800,7 +806,8 @@
       duration: fmt(lastElapsedMs),
       people,
       dig: digVal,
-      found: $('foundText').value.trim() || '—',
+      found,
+      foundOther,
       meta: currentMeta(),
       status: 'pending',   // pending | synced | failed
       attempts: 0,
@@ -815,6 +822,15 @@
     trySyncAll();
     if (finishPending) { finishPending = false; endHuntingSession(); }
   });
+
+  function foundSummary(rec) {
+    if (!rec.found || rec.found.length === 0) return rec.foundOther || '—';
+    const labels = rec.found.map(v => FOUND_LABELS[v] || v);
+    if (rec.found.includes('other') && rec.foundOther) {
+      labels[labels.indexOf('Other')] = 'Other: ' + rec.foundOther;
+    }
+    return labels.join(', ');
+  }
 
   function renderHistory() {
     $('countBadge').textContent = records.length;
@@ -833,7 +849,7 @@
           <span class="badge ${badgeClass}">${badgeText}</span>
         </div>
         <div class="rmeta">${r.people} searching · dug/inspected: ${r.dig}</div>
-        <div class="rmeta">${r.found}</div>
+        <div class="rmeta">${escXml(foundSummary(r))}</div>
         ${r.status === 'failed' && r.lastError ? `<div class="rmeta" style="color: var(--err); margin-top: 3px;">${escXml(r.lastError)}</div>` : ''}
       </div>`;
     }).join('');
@@ -850,10 +866,6 @@
   function populateSettingsForm() {
     $('cfgTeam').value = settings.team || '';
     $('cfgUrl').value = settings.appUserCode || settings.submissionUrl;
-    Object.keys(defaultFieldMap).forEach(key => {
-      const el = document.querySelector(`.mapfield input[data-key="${key}"]`);
-      if (el) el.value = settings.fieldMap[key] || defaultFieldMap[key];
-    });
   }
 
   $('settingsBtn').addEventListener('click', () => {
@@ -873,9 +885,6 @@
     settings.team = $('cfgTeam').value.trim();
     settings.appUserCode = rawInput;
     settings.submissionUrl = resolvedUrl;
-    document.querySelectorAll('.mapfield input[data-key]').forEach(el => {
-      settings.fieldMap[el.dataset.key] = el.value.trim() || defaultFieldMap[el.dataset.key];
-    });
     saveSettingsToStorage();
     $('settingsOverlay').classList.remove('show');
     trySyncAll();
@@ -957,20 +966,22 @@
   }
 
   function buildSubmissionXml(rec) {
-    const m = settings.fieldMap;
+    const m = FIELD_MAP;
     const root = FORM_ID;
     const instanceId = 'uuid:' + rec.id;
     return `<?xml version="1.0" encoding="UTF-8"?>
 <${root} id="${root}">
   <${m.date}>${escXml(rec.meta.date)}</${m.date}>
-  <${m.location}>${escXml(rec.meta.location)}</${m.location}>
+  <${m.locationLat}>${rec.meta.locationLat != null ? rec.meta.locationLat : ''}</${m.locationLat}>
+  <${m.locationLon}>${rec.meta.locationLon != null ? rec.meta.locationLon : ''}</${m.locationLon}>
   <${m.team}>${escXml(rec.meta.team)}</${m.team}>
   <${m.startTime}>${escXml(rec.meta.startTime)}</${m.startTime}>
   <${m.recordNumber}>${rec.n}</${m.recordNumber}>
   <${m.durationSeconds}>${rec.durationSec}</${m.durationSeconds}>
   <${m.peopleSearching}>${rec.people}</${m.peopleSearching}>
   <${m.digInspect}>${escXml(rec.dig)}</${m.digInspect}>
-  <${m.found}>${escXml(rec.found)}</${m.found}>
+  <${m.found}>${escXml((rec.found || []).join(' '))}</${m.found}>
+  <${m.foundOther}>${escXml(rec.foundOther || '')}</${m.foundOther}>
   <meta><instanceID>${instanceId}</instanceID></meta>
 </${root}>`;
   }
@@ -983,6 +994,11 @@
       return false;
     }
     rec.attempts += 1;
+    // A stalled request (dead connection, hung server, stuck CORS preflight) never resolves or
+    // rejects on its own — without a timeout it would wedge this record forever, and since
+    // trySyncAll awaits submissions one at a time, every record queued behind it too.
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 25000);
     try {
       const xml = buildSubmissionXml(rec);
       const blob = new Blob([xml], { type: 'text/xml' });
@@ -990,7 +1006,7 @@
       fd.append('xml_submission_file', blob, `${rec.id}.xml`);
 
       const headers = { 'X-OpenRosa-Version': '1.0' };
-      const res = await fetch(settings.submissionUrl, { method: 'POST', headers, body: fd });
+      const res = await fetch(settings.submissionUrl, { method: 'POST', headers, body: fd, signal: controller.signal });
       if (res.ok || res.status === 201 || res.status === 202) {
         rec.status = 'synced';
         rec.lastError = null;
@@ -1002,7 +1018,11 @@
       }
     } catch (err) {
       rec.status = 'failed';
-      rec.lastError = 'Network/CORS error (' + (err && err.message ? err.message : err) + ') — will retry when back online.';
+      rec.lastError = err && err.name === 'AbortError'
+        ? 'Submission timed out — will retry.'
+        : 'Network/CORS error (' + (err && err.message ? err.message : err) + ') — will retry when back online.';
+    } finally {
+      clearTimeout(timeoutId);
     }
     saveRecords();
     renderHistory();

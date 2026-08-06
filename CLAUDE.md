@@ -14,7 +14,7 @@ GitHub Pages (see "PWA shell" below).
   dependencies, no bundler, no package.json.
 - `goanna_burrow_detection.xlsx` — the companion XLSForm (sheets: `survey`, `choices`, `settings`)
   defining the KoboToolbox/ODK Central form that the app submits to. Field names in this workbook
-  must line up with `defaultFieldMap` in the HTML's `<script>` (see below) — if one changes, the
+  must line up with `FIELD_MAP` in the HTML's `<script>` (see below) — if one changes, the
   other needs to change too.
 - `manifest.json` / `sw.js` — web app manifest and service worker that make the app installable
   and precache the shell for offline use. See "PWA shell" below before touching these.
@@ -61,8 +61,9 @@ commented sections (search for the `// ---------- ... ----------` markers):
    normal) via the `finishPending` flag, then calls `endHuntingSession()` once that sheet closes
    (saved or cancelled) to flip the UI back to `#huntStartCard`.
 5. **XForms/OpenRosa submission** — `buildSubmissionXml(rec)` renders a record as an OpenRosa XML
-   instance using `settings.fieldMap` (defaults in `defaultFieldMap`) to map internal field names
-   to the target form's XML element names. `submitOne()` POSTs it as `xml_submission_file` in a
+   instance using the fixed `FIELD_MAP` constant to map internal field names to the target form's
+   XML element names (there's no user-facing way to remap these — they must match
+   `goanna_burrow_detection.xlsx`, see below). `submitOne()` POSTs it as `xml_submission_file` in a
    `multipart/form-data` body, matching the ODK Central / KoboToolbox submission API contract.
    Auth is carried in the URL itself (see the app-user-code note above) — there's no separate
    username/password.
@@ -97,15 +98,6 @@ hand-edit the base64.
 
 Bump `CACHE_NAME` in `sw.js` whenever you change what needs to be cached — it's also how old
 caches get cleaned up on `activate`.
-
-### Settings sheet field mapping
-
-The "Advanced" section of the settings sheet (`.mapfield` inputs, `data-key` attributes) lets a
-user remap internal field keys (`date`, `location`, `team`, `startTime`, `recordNumber`,
-`durationSeconds`, `peopleSearching`, `digInspect`, `found`) to whatever XML element names their
-specific Kobo/ODK form actually uses. This mapping is what `buildSubmissionXml` reads from —
-changes to submission format should go through `settings.fieldMap`, not by hardcoding element
-names.
 
 ### Styling
 

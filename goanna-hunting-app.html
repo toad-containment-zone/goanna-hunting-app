@@ -533,6 +533,16 @@
     <div class="sub">Point this app at your KoboToolbox or ODK Central form.</div>
 
     <div class="field">
+      <label>Native title area</label>
+      <select id="cfgNta">
+        <option value="none">Not on a native title area</option>
+        <option value="NTA-KJ">Karajarri</option>
+        <option value="NTA-NYKJ">Nyangumarta-Karajarri shared country</option>
+        <option value="NTA-NY">Nyangumarta</option>
+      </select>
+    </div>
+
+    <div class="field">
       <label>Hunting team names</label>
       <input type="text" id="cfgTeam" placeholder="e.g. J. Nangala, T. Watson">
     </div>
@@ -590,6 +600,7 @@
     date: 'date',
     locationLat: 'location_lat',
     locationLon: 'location_lon',
+    nativeTitleArea: 'native_title_area',
     team: 'hunting_team_names',
     startTime: 'start_time',
     recordNumber: 'record_number',
@@ -607,7 +618,8 @@
   let settings = {
     appUserCode: '',
     submissionUrl: '',
-    team: ''
+    team: '',
+    nativeTitleArea: 'none'
   };
 
   function loadSettings() {
@@ -664,7 +676,7 @@
 
   // ---------- hunting session ----------
   let huntingActive = false;
-  let sessionMeta = { date: '', startTime: '', locationLat: null, locationLon: null, team: '' };
+  let sessionMeta = { date: '', startTime: '', locationLat: null, locationLon: null, nativeTitleArea: '', team: '' };
 
   function currentMeta() {
     return sessionMeta;
@@ -677,6 +689,7 @@
       startTime: now.toTimeString().slice(0,5),
       locationLat: null,
       locationLon: null,
+      nativeTitleArea: settings.nativeTitleArea || 'none',
       team: settings.team || ''
     };
     if (navigator.geolocation) {
@@ -864,6 +877,7 @@
 
   // ---------- Settings sheet ----------
   function populateSettingsForm() {
+    $('cfgNta').value = settings.nativeTitleArea || 'none';
     $('cfgTeam').value = settings.team || '';
     $('cfgUrl').value = settings.appUserCode || settings.submissionUrl;
   }
@@ -882,6 +896,7 @@
       alert(err.message);
       return;
     }
+    settings.nativeTitleArea = $('cfgNta').value;
     settings.team = $('cfgTeam').value.trim();
     settings.appUserCode = rawInput;
     settings.submissionUrl = resolvedUrl;
@@ -974,6 +989,7 @@
   <${m.date}>${escXml(rec.meta.date)}</${m.date}>
   <${m.locationLat}>${rec.meta.locationLat != null ? rec.meta.locationLat : ''}</${m.locationLat}>
   <${m.locationLon}>${rec.meta.locationLon != null ? rec.meta.locationLon : ''}</${m.locationLon}>
+  <${m.nativeTitleArea}>${escXml(rec.meta.nativeTitleArea)}</${m.nativeTitleArea}>
   <${m.team}>${escXml(rec.meta.team)}</${m.team}>
   <${m.startTime}>${escXml(rec.meta.startTime)}</${m.startTime}>
   <${m.recordNumber}>${rec.n}</${m.recordNumber}>

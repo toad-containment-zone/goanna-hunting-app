@@ -46,11 +46,20 @@ commented sections (search for the `// ---------- ... ----------` markers):
    `settings.submissionUrl`, which is what actually gets POSTed to.
 2. **Hunting session** — there's no per-session metadata form. Tapping **Start hunting**
    (`startHunting()`) stamps `sessionMeta` (date/startTime from `new Date()`, `team` from
-   `settings.team`) and kicks off a non-blocking `navigator.geolocation.getCurrentPosition()` call
-   that fills in `sessionMeta.location` whenever it resolves (left blank if GPS fails — there's no
-   manual override anymore). `currentMeta()` just returns `sessionMeta`, and it's attached to every
-   record. `huntingActive` gates which card is visible (`#huntStartCard` vs `#timerCard`); team
-   name is captured once in Settings instead, since it rarely changes between sessions.
+   `settings.team`, `nativeTitleArea` from `settings.nativeTitleArea`) and kicks off a non-blocking
+   `navigator.geolocation.getCurrentPosition()` call that fills in `sessionMeta.location` whenever
+   it resolves (left blank if GPS fails — there's no manual override anymore). `currentMeta()` just
+   returns `sessionMeta`, and it's attached to every record. `huntingActive` gates which card is
+   visible (`#huntStartCard` vs `#timerCard`); team name and native title area are captured once in
+   Settings instead, since they rarely change between sessions.
+   - `nativeTitleArea` is manually selected from a fixed dropdown (`#cfgNta`), not auto-detected —
+     GPS in this app is best-effort and left blank on failure, so it can't be relied on as the sole
+     source for a governance-relevant tag (see `../shared-taxonomy` for why NTA matters here). The
+     dropdown's values (`NTA-KJ`, `NTA-NYKJ`, `NTA-NY`, `NTA-YWR`, `NTA-NML`, plus `none`) are a
+     hand-copied snapshot of the *active* rows in `../shared-taxonomy/taxonomy/native_title_areas.csv`
+     — that repo is the authoritative source; re-sync this dropdown (and the matching `nta_choices`
+     list in `goanna_burrow_detection.xlsx`) if it changes. The submitted value is the NTA's mnemonic
+     `nta_id`, not a display label, so it joins directly against that table downstream.
 3. **Timer** — a simple start/stop stopwatch (`running`, `startTs`, `tick()` on a 250ms interval)
    that measures burrow time-to-detection. Stopping opens the record-entry bottom sheet.
 4. **Record lifecycle** — each search produces a record object with a `status` of

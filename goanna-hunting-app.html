@@ -596,7 +596,12 @@
   const STORAGE_KEY = 'tcz_goanna_records_v1';
   const SETTINGS_KEY = 'tcz_goanna_settings_v1';
 
+  function newId() {
+    return crypto.randomUUID ? crypto.randomUUID() : 'id-' + Date.now() + '-' + Math.random().toString(16).slice(2);
+  }
+
   const FIELD_MAP = {
+    sessionId: 'session_id',
     date: 'date',
     locationLat: 'location_lat',
     locationLon: 'location_lon',
@@ -676,7 +681,7 @@
 
   // ---------- hunting session ----------
   let huntingActive = false;
-  let sessionMeta = { date: '', startTime: '', locationLat: null, locationLon: null, nativeTitleArea: '', team: '' };
+  let sessionMeta = { sessionId: '', date: '', startTime: '', locationLat: null, locationLon: null, nativeTitleArea: '', team: '' };
 
   function currentMeta() {
     return sessionMeta;
@@ -685,6 +690,7 @@
   function startHunting() {
     const now = new Date();
     sessionMeta = {
+      sessionId: newId(),
       date: now.toISOString().slice(0,10),
       startTime: now.toTimeString().slice(0,5),
       locationLat: null,
@@ -813,7 +819,7 @@
       : [];
     const foundOther = digVal === 'Yes' ? $('foundOtherText').value.trim() : '';
     const rec = {
-      id: (crypto.randomUUID ? crypto.randomUUID() : 'id-' + Date.now() + '-' + Math.random().toString(16).slice(2)),
+      id: newId(),
       n: records.length + 1,
       durationSec: Math.round(lastElapsedMs/1000),
       duration: fmt(lastElapsedMs),
@@ -986,6 +992,7 @@
     const instanceId = 'uuid:' + rec.id;
     return `<?xml version="1.0" encoding="UTF-8"?>
 <${root} id="${root}">
+  <${m.sessionId}>${escXml(rec.meta.sessionId)}</${m.sessionId}>
   <${m.date}>${escXml(rec.meta.date)}</${m.date}>
   <${m.locationLat}>${rec.meta.locationLat != null ? rec.meta.locationLat : ''}</${m.locationLat}>
   <${m.locationLon}>${rec.meta.locationLon != null ? rec.meta.locationLon : ''}</${m.locationLon}>

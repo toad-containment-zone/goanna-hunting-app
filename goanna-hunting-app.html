@@ -382,6 +382,37 @@
     letter-spacing: 0.02em;
     cursor: pointer;
   }
+  .saveRow {
+    display: flex;
+    gap: 8px;
+    margin-top: 18px;
+  }
+  .saveRow #saveBtn {
+    flex: 2;
+    margin-top: 0;
+  }
+  #discardBtn {
+    flex: 1;
+    padding: 14px;
+    border-radius: 9px;
+    border: 1.5px solid var(--err);
+    background: #fff;
+    color: var(--err);
+    font-size: 18px;
+    cursor: pointer;
+  }
+  #discardSheet #continueTimingBtn, #discardSheet #resetTimerBtn {
+    width: 100%;
+    margin-top: 12px;
+    padding: 14px;
+    border-radius: 9px;
+    border: none;
+    font-weight: 700;
+    font-size: 15px;
+    cursor: pointer;
+  }
+  #continueTimingBtn { background: var(--olive); color: #fff; }
+  #resetTimerBtn { background: var(--err); color: #fff; }
   .settingsNote {
     font-size: 11.5px;
     color: var(--muted);
@@ -522,7 +553,20 @@
       <input type="text" id="foundOtherText" class="hidden" placeholder="Please specify">
     </div>
 
-    <button id="saveBtn">Save record</button>
+    <div class="saveRow">
+      <button id="saveBtn">Save record</button>
+      <button id="discardBtn" aria-label="Discard record" title="Discard record">🗑</button>
+    </div>
+  </div>
+</div>
+
+<!-- Discard confirm sheet -->
+<div class="overlay" id="discardOverlay">
+  <div class="sheet" id="discardSheet">
+    <h3>Discard this search?</h3>
+    <div class="sub">You can keep timing from where you stopped, or reset the timer and discard this record.</div>
+    <button id="continueTimingBtn">Continue timing</button>
+    <button id="resetTimerBtn">Reset timer — discard record</button>
   </div>
 </div>
 
@@ -842,6 +886,33 @@
     if (finishPending) { finishPending = false; endHuntingSession(); }
   });
 
+  $('discardBtn').addEventListener('click', () => {
+    $('discardOverlay').classList.add('show');
+  });
+
+  $('continueTimingBtn').addEventListener('click', () => {
+    $('discardOverlay').classList.remove('show');
+    $('overlay').classList.remove('show');
+    finishPending = false;
+    running = true;
+    startTs = Date.now() - lastElapsedMs;
+    $('bigBtn').textContent = 'Found it — stop';
+    $('bigBtn').classList.add('running');
+    $('ring').classList.add('running');
+    $('ringLabel').textContent = 'searching…';
+    $('hintText').textContent = 'Hit stop the moment the burrow is found.';
+    tick();
+    tickHandle = setInterval(tick, 250);
+  });
+
+  $('resetTimerBtn').addEventListener('click', () => {
+    $('discardOverlay').classList.remove('show');
+    $('overlay').classList.remove('show');
+    lastElapsedMs = 0;
+    $('elapsed').textContent = '00:00';
+    if (finishPending) { finishPending = false; endHuntingSession(); }
+  });
+
   function foundSummary(rec) {
     if (!rec.found || rec.found.length === 0) return rec.foundOther || '—';
     const labels = rec.found.map(v => FOUND_LABELS[v] || v);
@@ -918,6 +989,10 @@
   });
   $('settingsOverlay').addEventListener('click', (e) => {
     if (e.target === $('settingsOverlay')) $('settingsOverlay').classList.remove('show');
+  });
+
+  $('discardOverlay').addEventListener('click', (e) => {
+    if (e.target === $('discardOverlay')) $('discardOverlay').classList.remove('show');
   });
 
   // ---------- QR code scanning (Central app user code) ----------

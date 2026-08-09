@@ -534,6 +534,14 @@
     </div>
 
     <div class="field">
+      <label>Was a burrow found?</label>
+      <div class="toggle2">
+        <button type="button" class="burrowFoundBtn" data-val="Yes">Yes</button>
+        <button type="button" class="burrowFoundBtn" data-val="No">No</button>
+      </div>
+    </div>
+
+    <div class="field hidden" id="digFieldWrap">
       <label>Did you dig or inspect the burrow?</label>
       <div class="toggle2">
         <button type="button" class="digBtn" data-val="Yes">Yes</button>
@@ -655,6 +663,7 @@
     recordNumber: 'record_number',
     durationSeconds: 'duration_seconds',
     peopleSearching: 'people_searching',
+    burrowFound: 'burrow_found',
     digInspect: 'dig_or_inspect',
     found: 'what_did_you_find',
     foundOther: 'what_did_you_find_other'
@@ -779,6 +788,7 @@
   let tickHandle = null;
   let lastElapsedMs = 0;
   let people = 1;
+  let burrowFoundVal = null;
   let digVal = null;
   let records = loadRecords();
 
@@ -798,11 +808,11 @@
     if (!running) {
       running = true;
       startTs = Date.now();
-      $('bigBtn').textContent = 'Found it — stop';
+      $('bigBtn').textContent = 'Stop search';
       $('bigBtn').classList.add('running');
       $('ring').classList.add('running');
       $('ringLabel').textContent = 'searching…';
-      $('hintText').textContent = 'Hit stop the moment the burrow is found.';
+      $('hintText').textContent = 'Hit stop when the search ends.';
       tickHandle = setInterval(tick, 250);
     } else {
       running = false;
@@ -820,17 +830,39 @@
   function openModal() {
     $('modalDur').textContent = fmt(lastElapsedMs);
     people = 1; $('peopleVal').textContent = people;
+    burrowFoundVal = null;
+    document.querySelectorAll('.burrowFoundBtn').forEach(b => b.classList.remove('active','yes','no'));
     digVal = null;
     document.querySelectorAll('.digBtn').forEach(b => b.classList.remove('active','yes','no'));
     document.querySelectorAll('.foundChk').forEach(c => c.checked = false);
     $('foundOtherText').value = '';
     $('foundOtherText').classList.add('hidden');
+    $('digFieldWrap').classList.add('hidden');
     $('foundFieldWrap').classList.add('hidden');
     $('overlay').classList.add('show');
   }
 
   $('minusP').addEventListener('click', () => { people = Math.max(1, people-1); $('peopleVal').textContent = people; });
   $('plusP').addEventListener('click', () => { people = Math.min(20, people+1); $('peopleVal').textContent = people; });
+
+  document.querySelectorAll('.burrowFoundBtn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.burrowFoundBtn').forEach(b => b.classList.remove('active','yes','no'));
+      burrowFoundVal = btn.dataset.val;
+      btn.classList.add('active', burrowFoundVal === 'Yes' ? 'yes' : 'no');
+      if (burrowFoundVal === 'Yes') {
+        $('digFieldWrap').classList.remove('hidden');
+      } else {
+        $('digFieldWrap').classList.add('hidden');
+        digVal = null;
+        document.querySelectorAll('.digBtn').forEach(b => b.classList.remove('active','yes','no'));
+        $('foundFieldWrap').classList.add('hidden');
+        document.querySelectorAll('.foundChk').forEach(c => c.checked = false);
+        $('foundOtherText').value = '';
+        $('foundOtherText').classList.add('hidden');
+      }
+    });
+  });
 
   document.querySelectorAll('.digBtn').forEach(btn => {
     btn.addEventListener('click', () => {
@@ -857,18 +889,21 @@
   });
 
   $('saveBtn').addEventListener('click', () => {
-    if (!digVal) { alert('Please select whether the burrow was dug or inspected.'); return; }
-    const found = digVal === 'Yes'
+    if (!burrowFoundVal) { alert('Please select whether a burrow was found.'); return; }
+    if (burrowFoundVal === 'Yes' && !digVal) { alert('Please select whether the burrow was dug or inspected.'); return; }
+    const dig = burrowFoundVal === 'Yes' ? digVal : '';
+    const found = (burrowFoundVal === 'Yes' && digVal === 'Yes')
       ? Array.from(document.querySelectorAll('.foundChk:checked')).map(c => c.value)
       : [];
-    const foundOther = digVal === 'Yes' ? $('foundOtherText').value.trim() : '';
+    const foundOther = (burrowFoundVal === 'Yes' && digVal === 'Yes') ? $('foundOtherText').value.trim() : '';
     const rec = {
       id: newId(),
       n: records.length + 1,
       durationSec: Math.round(lastElapsedMs/1000),
       duration: fmt(lastElapsedMs),
       people,
-      dig: digVal,
+      burrowFound: burrowFoundVal,
+      dig,
       found,
       foundOther,
       meta: currentMeta(),
@@ -896,11 +931,11 @@
     finishPending = false;
     running = true;
     startTs = Date.now() - lastElapsedMs;
-    $('bigBtn').textContent = 'Found it — stop';
+    $('bigBtn').textContent = 'Stop search';
     $('bigBtn').classList.add('running');
     $('ring').classList.add('running');
     $('ringLabel').textContent = 'searching…';
-    $('hintText').textContent = 'Hit stop the moment the burrow is found.';
+    $('hintText').textContent = 'Hit stop when the search ends.';
     tick();
     tickHandle = setInterval(tick, 250);
   });
@@ -938,8 +973,8 @@
           <span>Record #${r.n} <span class="dur">${r.duration}</span></span>
           <span class="badge ${badgeClass}">${badgeText}</span>
         </div>
-        <div class="rmeta">${r.people} searching · dug/inspected: ${r.dig}</div>
-        <div class="rmeta">${escXml(foundSummary(r))}</div>
+        <div class="rmeta">${r.people} searching · burrow found: ${r.burrowFound || '—'}</div>
+        ${r.burrowFound === 'Yes' ? `<div class="rmeta">dug/inspected: ${r.dig} · ${escXml(foundSummary(r))}</div>` : ''}
         ${r.status === 'failed' && r.lastError ? `<div class="rmeta" style="color: var(--err); margin-top: 3px;">${escXml(r.lastError)}</div>` : ''}
       </div>`;
     }).join('');
@@ -1077,6 +1112,7 @@
   <${m.recordNumber}>${rec.n}</${m.recordNumber}>
   <${m.durationSeconds}>${rec.durationSec}</${m.durationSeconds}>
   <${m.peopleSearching}>${rec.people}</${m.peopleSearching}>
+  <${m.burrowFound}>${escXml(rec.burrowFound)}</${m.burrowFound}>
   <${m.digInspect}>${escXml(rec.dig)}</${m.digInspect}>
   <${m.found}>${escXml((rec.found || []).join(' '))}</${m.found}>
   <${m.foundOther}>${escXml(rec.foundOther || '')}</${m.foundOther}>

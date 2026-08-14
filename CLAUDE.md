@@ -44,14 +44,23 @@ commented sections (search for the `// ---------- ... ----------` markers):
    `general.server_url` and append `/submission`. The raw pasted value is kept as
    `settings.appUserCode` so the field can be repopulated; the derived endpoint is
    `settings.submissionUrl`, which is what actually gets POSTed to.
-2. **Hunting session** — there's no per-session metadata form. Tapping **Start hunting**
-   (`startHunting()`) stamps `sessionMeta` (date/startTime from `new Date()`, `team` from
-   `settings.team`, `nativeTitleArea` from `settings.nativeTitleArea`) and kicks off a non-blocking
-   `navigator.geolocation.getCurrentPosition()` call that fills in `sessionMeta.location` whenever
-   it resolves (left blank if GPS fails — there's no manual override anymore). `currentMeta()` just
-   returns `sessionMeta`, and it's attached to every record. `huntingActive` gates which card is
-   visible (`#huntStartCard` vs `#timerCard`); team name and native title area are captured once in
-   Settings instead, since they rarely change between sessions.
+2. **No hunting-session concept** — each search stands alone; there is no Start/Finish-hunting
+   wrapper and no `session_id` field. `#timerCard` is always visible. Stopping a search
+   (`$('bigBtn')`'s stop branch, via `fetchSearchLocation()`) kicks off a non-blocking
+   `getLocation()` call — a thin wrapper around `navigator.geolocation.getCurrentPosition()` with
+   an explicit timeout and `enableHighAccuracy: true` — for *that search's* GPS fix (left blank if
+   GPS fails or hasn't resolved by Save — there's no manual override), then opens the record-entry
+   sheet. `$('saveBtn')` builds each record's `meta` object fresh at save time: `date`/`startTime`
+   derived from that search's `startTs`, `locationLat`/`locationLon` from the just-resolved GPS
+   fix, and `team`/`nativeTitleArea` read directly from `settings` (still captured once in
+   Settings, since those rarely change between searches even though location now does).
+   - Since a blank location has real consequences here, the app also proactively surfaces GPS
+     trouble rather than staying silent about it: `getLocation()` is called once on page load and
+     alerts (via `geoErrorMessage()`) if it fails, and `$('saveBtn')` alerts again — with a real
+     choice, via `confirm()` — the first time a record would save with no location. Declining
+     retries the fix and keeps the sheet open instead of saving; accepting sets the in-memory
+     `geoWarned` flag, which silences further prompts for the rest of the session (a fresh page
+     load re-arms both checks — `geoWarned` is intentionally not persisted).
    - `nativeTitleArea` is manually selected from a fixed dropdown (`#cfgNta`), not auto-detected —
      GPS in this app is best-effort and left blank on failure, so it can't be relied on as the sole
      source for a governance-relevant tag (see `../shared-taxonomy` for why NTA matters here). The
@@ -61,14 +70,24 @@ commented sections (search for the `// ---------- ... ----------` markers):
      list in `goanna_burrow_detection.xlsx`) if it changes. The submitted value is the NTA's mnemonic
      `nta_id`, not a display label, so it joins directly against that table downstream.
 3. **Timer** — a simple start/stop stopwatch (`running`, `startTs`, `tick()` on a 250ms interval)
-   that measures burrow time-to-detection. Stopping opens the record-entry bottom sheet.
+   that measures burrow time-to-detection. Stopping opens the record-entry bottom sheet. While
+   running, a Screen Wake Lock (`requestWakeLock()`/`releaseWakeLock()`) is held so the OS doesn't
+   suspend the tab (and stall `tick()`) when the phone locks or enters low-power mode — it's
+   re-acquired on `visibilitychange` since wake locks auto-release when the tab is hidden. A
+   `setInterval(beep, 60000)` also fires a short Web Audio tone every minute while running, as a
+   reminder for crews who forget to stop the timer.
 4. **Record lifecycle** — each search produces a record object with a `status` of
-   `pending → synced` or `failed`. Records are pushed to `records`, saved to `localStorage`
-   immediately, then a sync is attempted. Tapping a non-synced record in the history list retries
-   it individually via `submitOne()`. **Finish hunting** (`#finishHuntBtn`) ends the session: if a
-   search is still running it simulates a `#bigBtn` click first (same stop → record-sheet flow as
-   normal) via the `finishPending` flag, then calls `endHuntingSession()` once that sheet closes
-   (saved or cancelled) to flip the UI back to `#huntStartCard`.
+   `pending → synced` or `failed`. The record sheet requires an explicit number of searchers (no
+   default — `people` starts `null` and must be set via the stepper), whether the area was
+   recently burnt (`burnt`, a large driver of detectability), whether a burrow was found, and — if
+   so — whether it was inspected at all (`dig`: `Yes`/`No`, maps to the `dig_or_inspect` XForm
+   field — kept as Yes/No rather than repurposed for camera/dig, so its meaning and scoring stay
+   consistent with every submission recorded before this distinction existed) before asking how
+   (`method`: `camera` or `dig`, maps to a separate new `inspection_method` field, only asked if
+   inspected) and what was found (`found`, asked either way a burrow was inspected, since camera
+   inspection is more likely to yield "nothing" than digging). Records are pushed to `records`,
+   saved to `localStorage` immediately, then a sync is attempted. Tapping a non-synced record in
+   the history list retries it individually via `submitOne()`.
 5. **XForms/OpenRosa submission** — `buildSubmissionXml(rec)` renders a record as an OpenRosa XML
    instance using the fixed `FIELD_MAP` constant to map internal field names to the target form's
    XML element names (there's no user-facing way to remap these — they must match

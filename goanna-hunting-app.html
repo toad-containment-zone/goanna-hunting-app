@@ -273,22 +273,6 @@
 
   .hidden { display: none !important; }
 
-  #startHuntBtn, #finishHuntBtn {
-    width: 100%;
-    padding: 16px;
-    border-radius: 10px;
-    border: none;
-    font-size: 16px;
-    font-weight: 700;
-    letter-spacing: 0.03em;
-    text-transform: uppercase;
-    color: #fff;
-    cursor: pointer;
-  }
-  #startHuntBtn { background: var(--olive); }
-  #finishHuntBtn { background: var(--rock); margin-top: 14px; }
-  #startHuntBtn:active, #finishHuntBtn:active { transform: scale(0.98); }
-
   /* Modal / bottom sheets */
   .overlay {
     position: fixed; inset: 0;
@@ -334,6 +318,7 @@
     color: var(--olive-dark);
     cursor: pointer;
   }
+  .stepper button:disabled { opacity: 0.4; cursor: default; }
   .stepper span {
     font-size: 18px;
     font-weight: 700;
@@ -354,6 +339,7 @@
   }
   .toggle2 button.active.yes { border-color: var(--dirt); color: var(--dirt); background: #fff3ee; }
   .toggle2 button.active.no { border-color: var(--olive); color: var(--olive-dark); background: #f1f2e9; }
+  .toggle2 button.active:not(.yes):not(.no) { border-color: var(--olive); color: var(--olive-dark); background: #f1f2e9; }
   .chkgroup { display: flex; flex-direction: column; gap: 6px; }
   .chkopt {
     display: flex;
@@ -488,12 +474,7 @@
   </div>
 
   <main>
-    <div class="card" id="huntStartCard">
-      <button id="startHuntBtn">▶ Start hunting</button>
-      <div class="hint">Captures date, time and GPS location, then begins.</div>
-    </div>
-
-    <div class="card hidden" id="timerCard">
+    <div class="card" id="timerCard">
       <div class="timer-wrap">
         <div id="ring">
           <div>
@@ -511,7 +492,6 @@
       <div id="historyList">
         <div class="empty" id="emptyMsg">No searches recorded yet.</div>
       </div>
-      <button class="hidden" id="finishHuntBtn">■ Finish hunting</button>
     </div>
   </main>
 
@@ -534,6 +514,14 @@
     </div>
 
     <div class="field">
+      <label>Was this a burnt area?</label>
+      <div class="toggle2">
+        <button type="button" class="burntBtn" data-val="Yes">Yes</button>
+        <button type="button" class="burntBtn" data-val="No">No</button>
+      </div>
+    </div>
+
+    <div class="field">
       <label>Was a burrow found?</label>
       <div class="toggle2">
         <button type="button" class="burrowFoundBtn" data-val="Yes">Yes</button>
@@ -541,11 +529,19 @@
       </div>
     </div>
 
-    <div class="field hidden" id="digFieldWrap">
-      <label>Did you dig or inspect the burrow?</label>
+    <div class="field hidden" id="inspectedFieldWrap">
+      <label>Was the burrow inspected?</label>
       <div class="toggle2">
-        <button type="button" class="digBtn" data-val="Yes">Yes</button>
-        <button type="button" class="digBtn" data-val="No">No</button>
+        <button type="button" class="inspectedBtn" data-val="Yes">Yes</button>
+        <button type="button" class="inspectedBtn" data-val="No">No</button>
+      </div>
+    </div>
+
+    <div class="field hidden" id="digFieldWrap">
+      <label>How was the burrow inspected?</label>
+      <div class="toggle2">
+        <button type="button" class="digBtn" data-val="camera">Camera</button>
+        <button type="button" class="digBtn" data-val="dig">Dig</button>
       </div>
     </div>
 
@@ -553,8 +549,10 @@
       <label>What did you find?</label>
       <div class="chkgroup">
         <label class="chkopt"><input type="checkbox" class="foundChk" value="nothing"> Nothing</label>
-        <label class="chkopt"><input type="checkbox" class="foundChk" value="goanna"> Goanna</label>
-        <label class="chkopt"><input type="checkbox" class="foundChk" value="bluetongue"> Bluetongue</label>
+        <label class="chkopt"><input type="checkbox" class="foundChk" value="spiny_tailed_goanna"> Spiny-tailed goanna</label>
+        <label class="chkopt"><input type="checkbox" class="foundChk" value="sand_goanna"> Sand goanna</label>
+        <label class="chkopt"><input type="checkbox" class="foundChk" value="northern_bluetongue"> Northern blue tongue (black one)</label>
+        <label class="chkopt"><input type="checkbox" class="foundChk" value="centralian_bluetongue"> Centralian blue tongue (yellow one)</label>
         <label class="chkopt"><input type="checkbox" class="foundChk" value="king_brown"> King Brown</label>
         <label class="chkopt"><input type="checkbox" class="foundChk" value="other"> Other</label>
       </div>
@@ -653,7 +651,6 @@
   }
 
   const FIELD_MAP = {
-    sessionId: 'session_id',
     date: 'date',
     locationLat: 'location_lat',
     locationLon: 'location_lon',
@@ -663,13 +660,23 @@
     recordNumber: 'record_number',
     durationSeconds: 'duration_seconds',
     peopleSearching: 'people_searching',
+    burntArea: 'burnt_area',
     burrowFound: 'burrow_found',
     digInspect: 'dig_or_inspect',
+    inspectionMethod: 'inspection_method',
     found: 'what_did_you_find',
     foundOther: 'what_did_you_find_other'
   };
 
-  const FOUND_LABELS = { nothing: 'Nothing', goanna: 'Goanna', bluetongue: 'Bluetongue', king_brown: 'King Brown', other: 'Other' };
+  const FOUND_LABELS = {
+    nothing: 'Nothing',
+    spiny_tailed_goanna: 'Spiny-tailed goanna',
+    sand_goanna: 'Sand goanna',
+    northern_bluetongue: 'Northern blue tongue (black one)',
+    centralian_bluetongue: 'Centralian blue tongue (yellow one)',
+    king_brown: 'King Brown',
+    other: 'Other'
+  };
 
   const FORM_ID = 'goanna_burrow_detection';
 
@@ -732,65 +739,24 @@
     catch (e) { console.warn('records save failed', e); }
   }
 
-  // ---------- hunting session ----------
-  let huntingActive = false;
-  let sessionMeta = { sessionId: '', date: '', startTime: '', locationLat: null, locationLon: null, nativeTitleArea: '', team: '' };
-
-  function currentMeta() {
-    return sessionMeta;
-  }
-
-  function startHunting() {
-    const now = new Date();
-    sessionMeta = {
-      sessionId: newId(),
-      date: now.toISOString().slice(0,10),
-      startTime: now.toTimeString().slice(0,5),
-      locationLat: null,
-      locationLon: null,
-      nativeTitleArea: settings.nativeTitleArea || 'none',
-      team: settings.team || ''
-    };
-    if (navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition(pos => {
-        sessionMeta.locationLat = +pos.coords.latitude.toFixed(5);
-        sessionMeta.locationLon = +pos.coords.longitude.toFixed(5);
-      }, () => { /* location stays blank if unavailable */ });
-    }
-    huntingActive = true;
-    $('huntStartCard').classList.add('hidden');
-    $('timerCard').classList.remove('hidden');
-    $('finishHuntBtn').classList.remove('hidden');
-  }
-
-  function endHuntingSession() {
-    huntingActive = false;
-    $('timerCard').classList.add('hidden');
-    $('finishHuntBtn').classList.add('hidden');
-    $('huntStartCard').classList.remove('hidden');
-  }
-
-  $('startHuntBtn').addEventListener('click', startHunting);
-
-  let finishPending = false;
-  $('finishHuntBtn').addEventListener('click', () => {
-    if (running) {
-      finishPending = true;
-      $('bigBtn').click();
-    } else {
-      endHuntingSession();
-    }
-  });
-
   // ---------- timer ----------
   let running = false;
   let startTs = null;
   let tickHandle = null;
+  let beepTimer = null;
   let lastElapsedMs = 0;
-  let people = 1;
+  let people = null;
+  let burntVal = null;
   let burrowFoundVal = null;
-  let digVal = null;
+  let inspectedVal = null;
+  let methodVal = null;
   let records = loadRecords();
+  let pendingLat = null;
+  let pendingLon = null;
+  let pendingGeoError = null;
+  let geoWarned = false;
+  let wakeLock = null;
+  let audioCtx = null;
 
   function fmt(ms) {
     const total = Math.floor(ms/1000);
@@ -804,46 +770,157 @@
     $('elapsed').textContent = fmt(elapsed);
   }
 
+  // Screen Wake Lock keeps the tab foregrounded (and its timers running) while a search
+  // is in progress — without it, locking the phone or entering low-power mode can suspend
+  // the page and stall the stopwatch. Wake locks auto-release when the tab is hidden, so
+  // it's re-acquired on visibilitychange if a search is still running.
+  async function requestWakeLock() {
+    if (!('wakeLock' in navigator)) return;
+    try { wakeLock = await navigator.wakeLock.request('screen'); }
+    catch (e) { /* e.g. low battery — ignore, nothing more we can do */ }
+  }
+  function releaseWakeLock() {
+    if (wakeLock) { wakeLock.release().catch(() => {}); wakeLock = null; }
+  }
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && running) {
+      requestWakeLock();
+      tick();
+    }
+  });
+
+  function beep() {
+    try {
+      if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.type = 'sine'; osc.frequency.value = 880;
+      gain.gain.setValueAtTime(0.001, audioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.15, audioCtx.currentTime + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.35);
+      osc.connect(gain).connect(audioCtx.destination);
+      osc.start(); osc.stop(audioCtx.currentTime + 0.35);
+    } catch (e) { /* ignore */ }
+  }
+
+  function startTiming() {
+    $('bigBtn').textContent = 'Stop search';
+    $('bigBtn').classList.add('running');
+    $('ring').classList.add('running');
+    $('ringLabel').textContent = 'searching…';
+    $('hintText').textContent = 'Hit stop when the search ends.';
+    tickHandle = setInterval(tick, 250);
+    beep();
+    beepTimer = setInterval(beep, 60000);
+    requestWakeLock();
+  }
+
+  function stopTiming() {
+    clearInterval(tickHandle); tickHandle = null;
+    clearInterval(beepTimer); beepTimer = null;
+    releaseWakeLock();
+    $('bigBtn').textContent = 'Start search';
+    $('bigBtn').classList.remove('running');
+    $('ring').classList.remove('running');
+    $('ringLabel').textContent = 'ready to search';
+    $('hintText').textContent = 'Hit start when the search begins.';
+  }
+
+  // Wraps getCurrentPosition with a sane timeout (there is none by default, so a stuck fix
+  // could otherwise hang forever with neither callback ever firing) and high accuracy, since
+  // searches happen outdoors where that costs little.
+  function getLocation(onSuccess, onError) {
+    if (!navigator.geolocation) { onError({ code: 0 }); return; }
+    navigator.geolocation.getCurrentPosition(onSuccess, onError, {
+      enableHighAccuracy: true, timeout: 8000, maximumAge: 0
+    });
+  }
+
+  function geoErrorMessage(err) {
+    switch (err && err.code) {
+      case 1: return 'Location permission is off for this app — enable it in your device settings so searches record GPS coordinates.';
+      case 2: return 'Location services appear to be unavailable — check GPS/location is turned on.';
+      case 3: return 'Getting a GPS fix timed out — check location services are on and you have a clear view of the sky.';
+      default: return "This device/browser doesn't support location services — searches will save without GPS coordinates.";
+    }
+  }
+
+  function fetchSearchLocation() {
+    pendingLat = null;
+    pendingLon = null;
+    pendingGeoError = null;
+    getLocation(
+      pos => { pendingLat = +pos.coords.latitude.toFixed(5); pendingLon = +pos.coords.longitude.toFixed(5); },
+      err => { pendingGeoError = err; }
+    );
+  }
+
   $('bigBtn').addEventListener('click', () => {
     if (!running) {
       running = true;
       startTs = Date.now();
-      $('bigBtn').textContent = 'Stop search';
-      $('bigBtn').classList.add('running');
-      $('ring').classList.add('running');
-      $('ringLabel').textContent = 'searching…';
-      $('hintText').textContent = 'Hit stop when the search ends.';
-      tickHandle = setInterval(tick, 250);
+      startTiming();
     } else {
       running = false;
-      clearInterval(tickHandle);
       lastElapsedMs = Date.now() - startTs;
-      $('bigBtn').textContent = 'Start search';
-      $('bigBtn').classList.remove('running');
-      $('ring').classList.remove('running');
-      $('ringLabel').textContent = 'ready to search';
-      $('hintText').textContent = 'Hit start when the search begins.';
+      stopTiming();
+      // Each search now gets its own GPS fix, taken when it's stopped rather than once per
+      // hunting session — kick it off now so it has the record-entry sheet's dwell time to
+      // resolve before Save; if it hasn't resolved by then, the record just saves with blank
+      // lat/lon rather than blocking Save.
+      fetchSearchLocation();
       openModal();
     }
   });
 
   function openModal() {
     $('modalDur').textContent = fmt(lastElapsedMs);
-    people = 1; $('peopleVal').textContent = people;
+    people = null; $('peopleVal').textContent = '–'; $('minusP').disabled = true;
+    burntVal = null;
+    document.querySelectorAll('.burntBtn').forEach(b => b.classList.remove('active','yes','no'));
     burrowFoundVal = null;
     document.querySelectorAll('.burrowFoundBtn').forEach(b => b.classList.remove('active','yes','no'));
-    digVal = null;
-    document.querySelectorAll('.digBtn').forEach(b => b.classList.remove('active','yes','no'));
+    inspectedVal = null;
+    document.querySelectorAll('.inspectedBtn').forEach(b => b.classList.remove('active','yes','no'));
+    methodVal = null;
+    document.querySelectorAll('.digBtn').forEach(b => b.classList.remove('active'));
     document.querySelectorAll('.foundChk').forEach(c => c.checked = false);
     $('foundOtherText').value = '';
     $('foundOtherText').classList.add('hidden');
+    $('inspectedFieldWrap').classList.add('hidden');
     $('digFieldWrap').classList.add('hidden');
     $('foundFieldWrap').classList.add('hidden');
     $('overlay').classList.add('show');
   }
 
-  $('minusP').addEventListener('click', () => { people = Math.max(1, people-1); $('peopleVal').textContent = people; });
-  $('plusP').addEventListener('click', () => { people = Math.min(20, people+1); $('peopleVal').textContent = people; });
+  $('minusP').addEventListener('click', () => {
+    if (people == null) return;
+    people = Math.max(1, people-1);
+    $('peopleVal').textContent = people;
+  });
+  $('plusP').addEventListener('click', () => {
+    people = people == null ? 1 : Math.min(20, people+1);
+    $('peopleVal').textContent = people;
+    $('minusP').disabled = false;
+  });
+
+  document.querySelectorAll('.burntBtn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.burntBtn').forEach(b => b.classList.remove('active','yes','no'));
+      burntVal = btn.dataset.val;
+      btn.classList.add('active', burntVal === 'Yes' ? 'yes' : 'no');
+    });
+  });
+
+  function hideMethodAndFound() {
+    $('digFieldWrap').classList.add('hidden');
+    methodVal = null;
+    document.querySelectorAll('.digBtn').forEach(b => b.classList.remove('active'));
+    $('foundFieldWrap').classList.add('hidden');
+    document.querySelectorAll('.foundChk').forEach(c => c.checked = false);
+    $('foundOtherText').value = '';
+    $('foundOtherText').classList.add('hidden');
+  }
 
   document.querySelectorAll('.burrowFoundBtn').forEach(btn => {
     btn.addEventListener('click', () => {
@@ -851,32 +928,35 @@
       burrowFoundVal = btn.dataset.val;
       btn.classList.add('active', burrowFoundVal === 'Yes' ? 'yes' : 'no');
       if (burrowFoundVal === 'Yes') {
-        $('digFieldWrap').classList.remove('hidden');
+        $('inspectedFieldWrap').classList.remove('hidden');
       } else {
-        $('digFieldWrap').classList.add('hidden');
-        digVal = null;
-        document.querySelectorAll('.digBtn').forEach(b => b.classList.remove('active','yes','no'));
-        $('foundFieldWrap').classList.add('hidden');
-        document.querySelectorAll('.foundChk').forEach(c => c.checked = false);
-        $('foundOtherText').value = '';
-        $('foundOtherText').classList.add('hidden');
+        $('inspectedFieldWrap').classList.add('hidden');
+        inspectedVal = null;
+        document.querySelectorAll('.inspectedBtn').forEach(b => b.classList.remove('active','yes','no'));
+        hideMethodAndFound();
+      }
+    });
+  });
+
+  document.querySelectorAll('.inspectedBtn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.inspectedBtn').forEach(b => b.classList.remove('active','yes','no'));
+      inspectedVal = btn.dataset.val;
+      btn.classList.add('active', inspectedVal === 'Yes' ? 'yes' : 'no');
+      if (inspectedVal === 'Yes') {
+        $('digFieldWrap').classList.remove('hidden');
+        $('foundFieldWrap').classList.remove('hidden');
+      } else {
+        hideMethodAndFound();
       }
     });
   });
 
   document.querySelectorAll('.digBtn').forEach(btn => {
     btn.addEventListener('click', () => {
-      document.querySelectorAll('.digBtn').forEach(b => b.classList.remove('active','yes','no'));
-      digVal = btn.dataset.val;
-      btn.classList.add('active', digVal === 'Yes' ? 'yes' : 'no');
-      if (digVal === 'Yes') {
-        $('foundFieldWrap').classList.remove('hidden');
-      } else {
-        $('foundFieldWrap').classList.add('hidden');
-        document.querySelectorAll('.foundChk').forEach(c => c.checked = false);
-        $('foundOtherText').value = '';
-        $('foundOtherText').classList.add('hidden');
-      }
+      document.querySelectorAll('.digBtn').forEach(b => b.classList.remove('active'));
+      methodVal = btn.dataset.val;
+      btn.classList.add('active');
     });
   });
 
@@ -889,28 +969,53 @@
   });
 
   $('saveBtn').addEventListener('click', () => {
+    if (people == null) { alert('Please enter how many people were searching.'); return; }
+    if (!burntVal) { alert('Please select whether this was a burnt area.'); return; }
     if (!burrowFoundVal) { alert('Please select whether a burrow was found.'); return; }
-    if (burrowFoundVal === 'Yes' && !digVal) { alert('Please select whether the burrow was dug or inspected.'); return; }
-    const dig = burrowFoundVal === 'Yes' ? digVal : '';
-    const found = (burrowFoundVal === 'Yes' && digVal === 'Yes')
+    if (burrowFoundVal === 'Yes' && !inspectedVal) { alert('Please select whether the burrow was inspected.'); return; }
+    if (burrowFoundVal === 'Yes' && inspectedVal === 'Yes' && !methodVal) { alert('Please select how the burrow was inspected.'); return; }
+    const dig = burrowFoundVal === 'Yes' ? inspectedVal : '';
+    const method = (burrowFoundVal === 'Yes' && inspectedVal === 'Yes') ? methodVal : '';
+    const found = (burrowFoundVal === 'Yes' && inspectedVal === 'Yes')
       ? Array.from(document.querySelectorAll('.foundChk:checked')).map(c => c.value)
       : [];
-    const foundOther = (burrowFoundVal === 'Yes' && digVal === 'Yes') ? $('foundOtherText').value.trim() : '';
+    const foundOther = (burrowFoundVal === 'Yes' && inspectedVal === 'Yes') ? $('foundOtherText').value.trim() : '';
+    const started = new Date(startTs);
     const rec = {
       id: newId(),
       n: records.length + 1,
       durationSec: Math.round(lastElapsedMs/1000),
       duration: fmt(lastElapsedMs),
       people,
+      burnt: burntVal,
       burrowFound: burrowFoundVal,
       dig,
+      method,
       found,
       foundOther,
-      meta: currentMeta(),
+      meta: {
+        date: started.toISOString().slice(0,10),
+        startTime: started.toTimeString().slice(0,5),
+        locationLat: pendingLat,
+        locationLon: pendingLon,
+        nativeTitleArea: settings.nativeTitleArea || 'none',
+        team: settings.team || ''
+      },
       status: 'pending',   // pending | synced | failed
       attempts: 0,
       lastError: null
     };
+    if (rec.meta.locationLat == null && !geoWarned) {
+      const proceed = confirm(
+        geoErrorMessage(pendingGeoError) +
+        '\n\nSave this search without a location, and stop asking for the rest of this session?'
+      );
+      if (!proceed) {
+        fetchSearchLocation();
+        return; // don't save yet — sheet stays open so Save can be tapped again after fixing GPS
+      }
+      geoWarned = true;
+    }
     records.push(rec);
     saveRecords();
     $('overlay').classList.remove('show');
@@ -918,7 +1023,6 @@
     updateStatusBar();
     $('elapsed').textContent = '00:00';
     trySyncAll();
-    if (finishPending) { finishPending = false; endHuntingSession(); }
   });
 
   $('discardBtn').addEventListener('click', () => {
@@ -928,16 +1032,10 @@
   $('continueTimingBtn').addEventListener('click', () => {
     $('discardOverlay').classList.remove('show');
     $('overlay').classList.remove('show');
-    finishPending = false;
     running = true;
     startTs = Date.now() - lastElapsedMs;
-    $('bigBtn').textContent = 'Stop search';
-    $('bigBtn').classList.add('running');
-    $('ring').classList.add('running');
-    $('ringLabel').textContent = 'searching…';
-    $('hintText').textContent = 'Hit stop when the search ends.';
+    startTiming();
     tick();
-    tickHandle = setInterval(tick, 250);
   });
 
   $('resetTimerBtn').addEventListener('click', () => {
@@ -945,7 +1043,6 @@
     $('overlay').classList.remove('show');
     lastElapsedMs = 0;
     $('elapsed').textContent = '00:00';
-    if (finishPending) { finishPending = false; endHuntingSession(); }
   });
 
   function foundSummary(rec) {
@@ -974,7 +1071,9 @@
           <span class="badge ${badgeClass}">${badgeText}</span>
         </div>
         <div class="rmeta">${r.people} searching · burrow found: ${r.burrowFound || '—'}</div>
-        ${r.burrowFound === 'Yes' ? `<div class="rmeta">dug/inspected: ${r.dig} · ${escXml(foundSummary(r))}</div>` : ''}
+        ${r.burrowFound === 'Yes' ? (r.dig === 'Yes'
+          ? `<div class="rmeta">inspection: ${r.method} · ${escXml(foundSummary(r))}</div>`
+          : `<div class="rmeta">not inspected</div>`) : ''}
         ${r.status === 'failed' && r.lastError ? `<div class="rmeta" style="color: var(--err); margin-top: 3px;">${escXml(r.lastError)}</div>` : ''}
       </div>`;
     }).join('');
@@ -1020,7 +1119,6 @@
   $('overlay').addEventListener('click', (e) => {
     if (e.target !== $('overlay')) return;
     $('overlay').classList.remove('show');
-    if (finishPending) { finishPending = false; endHuntingSession(); }
   });
   $('settingsOverlay').addEventListener('click', (e) => {
     if (e.target === $('settingsOverlay')) $('settingsOverlay').classList.remove('show');
@@ -1102,7 +1200,6 @@
     const instanceId = 'uuid:' + rec.id;
     return `<?xml version="1.0" encoding="UTF-8"?>
 <${root} id="${root}">
-  <${m.sessionId}>${escXml(rec.meta.sessionId)}</${m.sessionId}>
   <${m.date}>${escXml(rec.meta.date)}</${m.date}>
   <${m.locationLat}>${rec.meta.locationLat != null ? rec.meta.locationLat : ''}</${m.locationLat}>
   <${m.locationLon}>${rec.meta.locationLon != null ? rec.meta.locationLon : ''}</${m.locationLon}>
@@ -1112,8 +1209,10 @@
   <${m.recordNumber}>${rec.n}</${m.recordNumber}>
   <${m.durationSeconds}>${rec.durationSec}</${m.durationSeconds}>
   <${m.peopleSearching}>${rec.people}</${m.peopleSearching}>
+  <${m.burntArea}>${escXml(rec.burnt)}</${m.burntArea}>
   <${m.burrowFound}>${escXml(rec.burrowFound)}</${m.burrowFound}>
   <${m.digInspect}>${escXml(rec.dig)}</${m.digInspect}>
+  <${m.inspectionMethod}>${escXml(rec.method)}</${m.inspectionMethod}>
   <${m.found}>${escXml((rec.found || []).join(' '))}</${m.found}>
   <${m.foundOther}>${escXml(rec.foundOther || '')}</${m.foundOther}>
   <meta><instanceID>${instanceId}</instanceID></meta>
@@ -1209,6 +1308,7 @@
   renderHistory();
   updateStatusBar();
   if (navigator.onLine) trySyncAll();
+  getLocation(() => {}, err => alert(geoErrorMessage(err)));
 </script>
 </body>
 </html>

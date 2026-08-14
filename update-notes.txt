@@ -1,0 +1,18 @@
+We have field-tested the app.  Some important issues came up around usability.
+
+1. We noticed that the timer stops when the device is on low power mode.  It would be good to ensure this doesn't happen.
+
+2. We need to add an additional covariate of burnt/not-burnt.  That is, in some survey areas, the area will have recently been burnt, which makes it easier to spot burrows.  At some times and places, there will not have been a recent fire.  Given this will have a large bearing on detection rate, we need to record this.
+
+3. We think it makes better sense to not nest searches within hunting session anymore.  So instead, each hunting search will get its own geolocation (recorded at the end of the search), and there will not be the start hunting / finish hunting buttons to open up the search timer.  We will of course not need the session ID field anymore.
+
+4. Users often forgot to specify the number of searchers because of the default number of people = 1.  This needs to not have a default and be a required field.
+
+5. Users often forgot to stop the timer.  Particularly when no burrow was found.  A gentle beep every minute while the timer is running might be a good way to prompt attention here.
+
+5. The inspection by camera did not work particularly well.  So inspection by camera is much more likely to yield "nothing" than a burrow that is dug up.  So we need to record whether it was inspected by camera, or by digging.
+
+6. In the "what was found" list, we need to split "goanna" into "spiny-tailed goanna", "sand goanna", and we need to split "blue tongue" into "Northern blue tongue (black one)" and "Centralian blue tongue (yellow one)".
+
+7. Photos.  One user suggested that we might want to take photos of each burrow.  I am less convinced this is necessary, and will add a large burden to the data being synced.  Still, I am interested to know if photo upload is an option with ODK Central.
+

@@ -303,6 +303,13 @@
     color: var(--muted);
     margin-bottom: 16px;
   }
+  #gpsStatus {
+    font-size: 12.5px;
+    color: var(--muted);
+    margin: -12px 0 16px;
+    min-height: 1.1em;
+  }
+  #gpsStatus.warn { color: var(--warn); }
   .stepper {
     display: flex;
     align-items: center;
@@ -503,6 +510,7 @@
   <div class="sheet" id="sheet">
     <h3>Search complete — <span id="modalDur">00:00</span></h3>
     <div class="sub">A few quick details before the next search.</div>
+    <div id="gpsStatus"></div>
 
     <div class="field">
       <label>How many people were searching?</label>
@@ -583,16 +591,6 @@
     <div class="sub">Point this app at your KoboToolbox or ODK Central form.</div>
 
     <div class="field">
-      <label>Native title area</label>
-      <select id="cfgNta">
-        <option value="none">Not on a native title area</option>
-        <option value="NTA-KJ">Karajarri</option>
-        <option value="NTA-NYKJ">Nyangumarta-Karajarri shared country</option>
-        <option value="NTA-NY">Nyangumarta</option>
-      </select>
-    </div>
-
-    <div class="field">
       <label>Hunting team names</label>
       <input type="text" id="cfgTeam" placeholder="e.g. J. Nangala, T. Watson">
     </div>
@@ -654,7 +652,6 @@
     date: 'date',
     locationLat: 'location_lat',
     locationLon: 'location_lon',
-    nativeTitleArea: 'native_title_area',
     team: 'hunting_team_names',
     startTime: 'start_time',
     recordNumber: 'record_number',
@@ -683,8 +680,7 @@
   let settings = {
     appUserCode: '',
     submissionUrl: '',
-    team: '',
-    nativeTitleArea: 'none'
+    team: ''
   };
 
   function loadSettings() {
@@ -753,8 +749,11 @@
   let records = loadRecords();
   let pendingLat = null;
   let pendingLon = null;
+  let pendingAccuracy = null;   // metres; drives the live readout + soft gate only, never submitted
   let pendingGeoError = null;
-  let geoWarned = false;
+  let geoWarned = false;        // "save without any location" prompt — once per session
+  let gpsGateWarned = false;    // "best fix was poor, save anyway" prompt — once per session
+  let gpsSampling = false;
   let wakeLock = null;
   let audioCtx = null;
 
@@ -828,7 +827,8 @@
 
   // Wraps getCurrentPosition with a sane timeout (there is none by default, so a stuck fix
   // could otherwise hang forever with neither callback ever firing) and high accuracy, since
-  // searches happen outdoors where that costs little.
+  // searches happen outdoors where that costs little. Used only for the passive page-load
+  // permission/hardware check — a search's real coordinates come from sampleLocation() below.
   function getLocation(onSuccess, onError) {
     if (!navigator.geolocation) { onError({ code: 0 }); return; }
     navigator.geolocation.getCurrentPosition(onSuccess, onError, {
@@ -845,13 +845,98 @@
     }
   }
 
+  const GPS_TARGET_ACCURACY_M = 10;    // stop sampling once the fix is at least this good
+  const GPS_SAMPLE_MAX_MS     = 45000; // ...otherwise stop trying to improve it after this long
+  const GPS_GATE_WARN_M       = 25;    // warn (but don't block) if the best fix is worse than this
+
+  // Sampling GPS capture. getCurrentPosition() returns the first fix the platform has, which on
+  // a cold start is often a coarse wifi/cell fix tens to hundreds of metres out; GNSS then keeps
+  // improving for 30-60s. So instead of one fix, watch for up to GPS_SAMPLE_MAX_MS, keep the
+  // smallest-accuracy reading seen, and stop early once it's within GPS_TARGET_ACCURACY_M.
+  // onProgress fires on every improved fix (for the live "±N m" readout); onDone fires once with
+  // the best Position; onError fires only if no fix ever arrived. Returns stop(abort) — stop()
+  // finishes early with the best fix so far, stop(true) aborts silently (sheet closed).
+  let activeGpsStop = null;
+  function sampleLocation(onProgress, onDone, onError) {
+    if (activeGpsStop) activeGpsStop(true);
+    if (!navigator.geolocation) { onError({ code: 0 }); return () => {}; }
+    let best = null, settled = false;
+    const stop = (abort) => {
+      if (settled) return;
+      settled = true;
+      navigator.geolocation.clearWatch(id);
+      clearTimeout(timer);
+      if (activeGpsStop === stop) activeGpsStop = null;
+      if (abort) return;
+      if (best) onDone(best); else onError({ code: 3 });
+    };
+    const id = navigator.geolocation.watchPosition(
+      pos => {
+        if (!best || pos.coords.accuracy < best.coords.accuracy) best = pos;
+        onProgress(best);
+        if (best.coords.accuracy <= GPS_TARGET_ACCURACY_M) stop();
+      },
+      // A transient watch error after we already have a fix shouldn't discard a good sample.
+      err => { if (!best) { settled = true; clearTimeout(timer); if (activeGpsStop === stop) activeGpsStop = null; onError(err); } },
+      { enableHighAccuracy: true, timeout: GPS_SAMPLE_MAX_MS, maximumAge: 0 }
+    );
+    const timer = setTimeout(() => stop(), GPS_SAMPLE_MAX_MS);
+    activeGpsStop = stop;
+    return stop;
+  }
+
+  // Reflects the current sample's progress in the record sheet's #gpsStatus line.
+  function updateGpsStatus() {
+    const el = $('gpsStatus');
+    if (!el) return;
+    el.classList.remove('warn');
+    if (pendingGeoError) { el.textContent = geoErrorMessage(pendingGeoError); return; }
+    if (pendingAccuracy == null) {
+      el.textContent = gpsSampling ? 'Getting GPS fix…' : '';
+      return;
+    }
+    const acc = Math.round(pendingAccuracy);
+    if (gpsSampling) {
+      el.textContent = 'Improving GPS fix… ±' + acc + ' m (waiting for ±' + GPS_TARGET_ACCURACY_M + ' m)';
+    } else if (pendingAccuracy > GPS_GATE_WARN_M) {
+      el.classList.add('warn');
+      el.textContent = '⚠ Best GPS fix was only ±' + acc + ' m — stand in the open with a clear view of the sky.';
+    } else {
+      el.textContent = 'GPS fix ±' + acc + ' m';
+    }
+  }
+
+  function stopGpsSample() {
+    if (activeGpsStop) activeGpsStop(true);
+    gpsSampling = false;
+  }
+
   function fetchSearchLocation() {
     pendingLat = null;
     pendingLon = null;
+    pendingAccuracy = null;
     pendingGeoError = null;
-    getLocation(
-      pos => { pendingLat = +pos.coords.latitude.toFixed(5); pendingLon = +pos.coords.longitude.toFixed(5); },
-      err => { pendingGeoError = err; }
+    gpsSampling = true;
+    updateGpsStatus();
+    sampleLocation(
+      best => {   // onProgress — each improved fix
+        pendingLat = +best.coords.latitude.toFixed(5);
+        pendingLon = +best.coords.longitude.toFixed(5);
+        pendingAccuracy = best.coords.accuracy;
+        updateGpsStatus();
+      },
+      best => {   // onDone — target reached or window elapsed
+        pendingLat = +best.coords.latitude.toFixed(5);
+        pendingLon = +best.coords.longitude.toFixed(5);
+        pendingAccuracy = best.coords.accuracy;
+        gpsSampling = false;
+        updateGpsStatus();
+      },
+      err => {    // onError — no fix at all
+        pendingGeoError = err;
+        gpsSampling = false;
+        updateGpsStatus();
+      }
     );
   }
 
@@ -875,6 +960,7 @@
 
   function openModal() {
     $('modalDur').textContent = fmt(lastElapsedMs);
+    updateGpsStatus();
     people = null; $('peopleVal').textContent = '–'; $('minusP').disabled = true;
     burntVal = null;
     document.querySelectorAll('.burntBtn').forEach(b => b.classList.remove('active','yes','no'));
@@ -998,7 +1084,6 @@
         startTime: started.toTimeString().slice(0,5),
         locationLat: pendingLat,
         locationLon: pendingLon,
-        nativeTitleArea: settings.nativeTitleArea || 'none',
         team: settings.team || ''
       },
       status: 'pending',   // pending | synced | failed
@@ -1016,8 +1101,21 @@
       }
       geoWarned = true;
     }
+    if (rec.meta.locationLat != null && pendingAccuracy != null &&
+        pendingAccuracy > GPS_GATE_WARN_M && !gpsGateWarned) {
+      const proceed = confirm(
+        'The best GPS fix for this search was only ±' + Math.round(pendingAccuracy) +
+        ' m. Save the record with these coordinates anyway, and stop asking for the rest of this session?'
+      );
+      if (!proceed) {
+        if (!gpsSampling) fetchSearchLocation(); // try again for a sharper fix; sheet stays open
+        return;
+      }
+      gpsGateWarned = true;
+    }
     records.push(rec);
     saveRecords();
+    stopGpsSample();
     $('overlay').classList.remove('show');
     renderHistory();
     updateStatusBar();
@@ -1030,6 +1128,7 @@
   });
 
   $('continueTimingBtn').addEventListener('click', () => {
+    stopGpsSample(); // a fresh fix is taken when the timer is stopped again
     $('discardOverlay').classList.remove('show');
     $('overlay').classList.remove('show');
     running = true;
@@ -1039,6 +1138,7 @@
   });
 
   $('resetTimerBtn').addEventListener('click', () => {
+    stopGpsSample();
     $('discardOverlay').classList.remove('show');
     $('overlay').classList.remove('show');
     lastElapsedMs = 0;
@@ -1088,7 +1188,6 @@
 
   // ---------- Settings sheet ----------
   function populateSettingsForm() {
-    $('cfgNta').value = settings.nativeTitleArea || 'none';
     $('cfgTeam').value = settings.team || '';
     $('cfgUrl').value = settings.appUserCode || settings.submissionUrl;
   }
@@ -1107,7 +1206,6 @@
       alert(err.message);
       return;
     }
-    settings.nativeTitleArea = $('cfgNta').value;
     settings.team = $('cfgTeam').value.trim();
     settings.appUserCode = rawInput;
     settings.submissionUrl = resolvedUrl;
@@ -1118,6 +1216,7 @@
 
   $('overlay').addEventListener('click', (e) => {
     if (e.target !== $('overlay')) return;
+    stopGpsSample();
     $('overlay').classList.remove('show');
   });
   $('settingsOverlay').addEventListener('click', (e) => {
@@ -1203,7 +1302,6 @@
   <${m.date}>${escXml(rec.meta.date)}</${m.date}>
   <${m.locationLat}>${rec.meta.locationLat != null ? rec.meta.locationLat : ''}</${m.locationLat}>
   <${m.locationLon}>${rec.meta.locationLon != null ? rec.meta.locationLon : ''}</${m.locationLon}>
-  <${m.nativeTitleArea}>${escXml(rec.meta.nativeTitleArea)}</${m.nativeTitleArea}>
   <${m.team}>${escXml(rec.meta.team)}</${m.team}>
   <${m.startTime}>${escXml(rec.meta.startTime)}</${m.startTime}>
   <${m.recordNumber}>${rec.n}</${m.recordNumber}>

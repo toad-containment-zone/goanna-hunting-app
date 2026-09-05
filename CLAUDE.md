@@ -46,14 +46,26 @@ commented sections (search for the `// ---------- ... ----------` markers):
    `settings.submissionUrl`, which is what actually gets POSTed to.
 2. **No hunting-session concept** — each search stands alone; there is no Start/Finish-hunting
    wrapper and no `session_id` field. `#timerCard` is always visible. Stopping a search
-   (`$('bigBtn')`'s stop branch, via `fetchSearchLocation()`) kicks off a non-blocking
-   `getLocation()` call — a thin wrapper around `navigator.geolocation.getCurrentPosition()` with
-   an explicit timeout and `enableHighAccuracy: true` — for *that search's* GPS fix (left blank if
-   GPS fails or hasn't resolved by Save — there's no manual override), then opens the record-entry
-   sheet. `$('saveBtn')` builds each record's `meta` object fresh at save time: `date`/`startTime`
-   derived from that search's `startTs`, `locationLat`/`locationLon` from the just-resolved GPS
-   fix, and `team`/`nativeTitleArea` read directly from `settings` (still captured once in
-   Settings, since those rarely change between searches even though location now does).
+   (`$('bigBtn')`'s stop branch, via `fetchSearchLocation()`) kicks off a non-blocking GPS
+   capture for *that search's* fix, then opens the record-entry sheet. `$('saveBtn')` builds each
+   record's `meta` object fresh at save time: `date`/`startTime` derived from that search's
+   `startTs`, `locationLat`/`locationLon` from the just-resolved GPS fix, and `team` read directly
+   from `settings` (still captured once in Settings, since it rarely changes between searches even
+   though location now does).
+   - **GPS capture is a sampler, not a single fix.** `getCurrentPosition()` returns the first fix
+     the platform has, which on a cold start is often a coarse wifi/cell fix tens to hundreds of
+     metres out; GNSS keeps refining for 30-60s after. So `sampleLocation()` (next to
+     `getLocation()`, ported from `../toad-monitoring-app`) runs `watchPosition` for up to
+     `GPS_SAMPLE_MAX_MS` (45s), keeps the smallest-`accuracy` reading, and stops early once it's
+     within `GPS_TARGET_ACCURACY_M` (10m). `#gpsStatus` in the record sheet shows a live "±N m"
+     readout (`updateGpsStatus()`). `getLocation()` itself — the old single-fix wrapper — is now
+     used only for the passive page-load permission/hardware check. The sampler is aborted
+     (`stopGpsSample()`) when the sheet closes without a save (backdrop tap, "reset timer",
+     "continue timing") and after a successful save.
+   - `coords.accuracy` drives the live readout and a **soft gate** only — it is not stored on the
+     record or in the submission (`location_lat`/`location_lon` are unchanged). If the best fix
+     was worse than `GPS_GATE_WARN_M` (25m), `$('saveBtn')` asks once via `confirm()` before
+     saving (session-suppressed by `gpsGateWarned`, mirroring `geoWarned`).
    - Since a blank location has real consequences here, the app also proactively surfaces GPS
      trouble rather than staying silent about it: `getLocation()` is called once on page load and
      alerts (via `geoErrorMessage()`) if it fails, and `$('saveBtn')` alerts again — with a real
@@ -61,14 +73,21 @@ commented sections (search for the `// ---------- ... ----------` markers):
      retries the fix and keeps the sheet open instead of saving; accepting sets the in-memory
      `geoWarned` flag, which silences further prompts for the rest of the session (a fresh page
      load re-arms both checks — `geoWarned` is intentionally not persisted).
-   - `nativeTitleArea` is manually selected from a fixed dropdown (`#cfgNta`), not auto-detected —
-     GPS in this app is best-effort and left blank on failure, so it can't be relied on as the sole
-     source for a governance-relevant tag (see `../shared-taxonomy` for why NTA matters here). The
-     dropdown's values (`NTA-KJ`, `NTA-NYKJ`, `NTA-NY`, `NTA-YWR`, `NTA-NML`, plus `none`) are a
-     hand-copied snapshot of the *active* rows in `../shared-taxonomy/taxonomy/native_title_areas.csv`
-     — that repo is the authoritative source; re-sync this dropdown (and the matching `nta_choices`
-     list in `goanna_burrow_detection.xlsx`) if it changes. The submitted value is the NTA's mnemonic
-     `nta_id`, not a display label, so it joins directly against that table downstream.
+   - **Native title area is no longer collected.** The app used to capture it once in Settings
+     (`#cfgNta`) and stamp `settings.nativeTitleArea` onto every record, backed by an `nta_choices`
+     list in `goanna_burrow_detection.xlsx` hand-copied from
+     `../shared-taxonomy/taxonomy/native_title_areas.csv`. That was dropped (mirroring
+     `../toad-monitoring-app`'s `cce170b`) once the intent settled on deriving NTA downstream in
+     the `data-warehousing` ETL from each record's geolocation via spatial join against NTA
+     boundaries — the reporting layer becomes the single source of truth. Removed end-to-end: the
+     `<select>`, `FIELD_MAP` entry, `settings` default, `meta` field, `populateSettingsForm()` /
+     `saveSettingsBtn` lines, the `<native_title_area>` element in `buildSubmissionXml()`, and the
+     `native_title_area` survey row + `nta_choices` list in the XLSForm (re-validated with
+     `xls2xform`). Central/Kobo keeps the historical `native_title_area` column; new submissions
+     just omit it. The goanna-side warehouse ETL is not built yet — the derivation machinery
+     (`core.native_title_area_crosswalk`, boundary polygons, `flatten_toad_survey.R`) already
+     exists for the toad survey and would be reused. Note goanna GPS can still be blank on failure,
+     so that ETL will need an "unresolved NTA" state as the toad ETL has.
 3. **Timer** — a simple start/stop stopwatch (`running`, `startTs`, `tick()` on a 250ms interval)
    that measures burrow time-to-detection. Stopping opens the record-entry bottom sheet. While
    running, a Screen Wake Lock (`requestWakeLock()`/`releaseWakeLock()`) is held so the OS doesn't

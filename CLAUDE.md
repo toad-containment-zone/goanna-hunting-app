@@ -66,6 +66,20 @@ commented sections (search for the `// ---------- ... ----------` markers):
      record or in the submission (`location_lat`/`location_lon` are unchanged). If the best fix
      was worse than `GPS_GATE_WARN_M` (25m), `$('saveBtn')` asks once via `confirm()` before
      saving (session-suppressed by `gpsGateWarned`, mirroring `geoWarned`).
+   - **Each search also records a GPS track**, not just the stop point — a fix at timer start, one
+     per minute while running (`trackTimer`, alongside the beep interval), and the stop-sampler's
+     fix as the last point. Points accumulate in the module-level `trackPoints` array
+     (`{ ms, lat, lon, alt, acc }`, `ms` = elapsed since `startTs`), reset on a fresh start and on
+     "reset timer", carried across a "continue timing" pause (leaving a gap). Each vertex is a
+     single `getLocation()` one-shot — a failed fix just leaves a gap. At save, `trackPoints` is
+     copied to `rec.track` and serialised by `buildSubmissionXml()` into two form fields:
+     `search_track` (ODK `geotrace`: `"lat lon alt acc"` per point, `;`-joined, **no trailing
+     `;`**, `dedupeTrack()` guarantees ≥2 points with first ≠ last, else empty) and
+     `search_track_seconds` (`;`-joined elapsed-seconds, index-aligned to `search_track`, since
+     geotrace carries no timestamps — needed downstream to spot a forgotten timer + drive to the
+     next site by segment speed). `location_lat`/`location_lon` are unchanged (still the
+     accuracy-gated stop fix); downstream uses `search_track`'s first point as the search-start
+     location. A small `#trackStatus` line on the timer card shows the running point count.
    - Since a blank location has real consequences here, the app also proactively surfaces GPS
      trouble rather than staying silent about it: `getLocation()` is called once on page load and
      alerts (via `geoErrorMessage()`) if it fails, and `$('saveBtn')` alerts again — with a real
@@ -94,7 +108,9 @@ commented sections (search for the `// ---------- ... ----------` markers):
    suspend the tab (and stall `tick()`) when the phone locks or enters low-power mode — it's
    re-acquired on `visibilitychange` since wake locks auto-release when the tab is hidden. A
    `setInterval(beep, 60000)` also fires a short Web Audio tone every minute while running, as a
-   reminder for crews who forget to stop the timer.
+   reminder for crews who forget to stop the timer. A parallel `trackTimer` (`setInterval(
+   logTrackPoint, 60000)`, started/cleared in `startTiming()`/`stopTiming()`) records the search's
+   GPS track — see the GPS-track bullet under section 2.
 4. **Record lifecycle** — each search produces a record object with a `status` of
    `pending → synced` or `failed`. The record sheet requires an explicit number of searchers (no
    default — `people` starts `null` and must be set via the stepper), whether the area was
@@ -113,7 +129,15 @@ commented sections (search for the `// ---------- ... ----------` markers):
    `goanna_burrow_detection.xlsx`, see below). `submitOne()` POSTs it as `xml_submission_file` in a
    `multipart/form-data` body, matching the ODK Central / KoboToolbox submission API contract.
    Auth is carried in the URL itself (see the app-user-code note above) — there's no separate
-   username/password.
+   username/password. The instance is hand-written, so anything with a non-trivial serialisation
+   is encoded here rather than by an XForms engine: `select_multiple` is space-joined; the
+   `search_track` `geotrace` is `"lat lon alt acc"` per point (ODK's `lat lon` order, **not**
+   GeoJSON's), points `;`-joined with no trailing `;`, and needs ≥2 points with first ≠ last or
+   it's spec-invalid (`dedupeTrack()` enforces this, emitting empty otherwise).
+   If you add a form field, place its element in `buildSubmissionXml()` to match its position in
+   the `survey` sheet and re-validate the XLSForm: `pip install pyxform` in a throwaway venv, then
+   `xls2xform goanna_burrow_detection.xlsx /tmp/check.xml` — a clean "Conversion complete!" means
+   pyxform and ODK Validate both accepted it.
 6. **Sync orchestration** — `trySyncAll()` walks all non-synced records and submits them
    sequentially; it's triggered on save, on manual "Sync now", on the `online` browser event, and
    on a 30s interval. `updateStatusBar()` reflects online/offline state and pending count in the

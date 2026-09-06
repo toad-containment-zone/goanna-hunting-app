@@ -220,6 +220,11 @@
     color: var(--muted);
     margin-top: 10px;
   }
+  #trackStatus {
+    margin-top: 4px;
+    font-variant-numeric: tabular-nums;
+  }
+  #trackStatus:empty { display: none; }
 
   #history h2 {
     font-size: 11px;
@@ -491,6 +496,7 @@
         </div>
         <button id="bigBtn">Start search</button>
         <div class="hint" id="hintText">Hit start when the search begins.</div>
+        <div class="hint" id="trackStatus"></div>
       </div>
     </div>
 
@@ -652,6 +658,8 @@
     date: 'date',
     locationLat: 'location_lat',
     locationLon: 'location_lon',
+    searchTrack: 'search_track',
+    searchTrackSeconds: 'search_track_seconds',
     team: 'hunting_team_names',
     startTime: 'start_time',
     recordNumber: 'record_number',
@@ -740,6 +748,8 @@
   let startTs = null;
   let tickHandle = null;
   let beepTimer = null;
+  let trackTimer = null;
+  let trackPoints = [];   // [{ ms, lat, lon, alt, acc }] for the current search; ms = elapsed since startTs
   let lastElapsedMs = 0;
   let people = null;
   let burntVal = null;
@@ -811,12 +821,15 @@
     tickHandle = setInterval(tick, 250);
     beep();
     beepTimer = setInterval(beep, 60000);
+    trackTimer = setInterval(logTrackPoint, TRACK_INTERVAL_MS);
+    updateTrackStatus();
     requestWakeLock();
   }
 
   function stopTiming() {
     clearInterval(tickHandle); tickHandle = null;
     clearInterval(beepTimer); beepTimer = null;
+    clearInterval(trackTimer); trackTimer = null;
     releaseWakeLock();
     $('bigBtn').textContent = 'Start search';
     $('bigBtn').classList.remove('running');
@@ -848,6 +861,55 @@
   const GPS_TARGET_ACCURACY_M = 10;    // stop sampling once the fix is at least this good
   const GPS_SAMPLE_MAX_MS     = 45000; // ...otherwise stop trying to improve it after this long
   const GPS_GATE_WARN_M       = 25;    // warn (but don't block) if the best fix is worse than this
+
+  const TRACK_INTERVAL_MS = 60000; // one track fix per minute while the timer runs
+  const TRACK_MAX_POINTS  = 1000;  // backstop (~16h) — records re-serialise in full on every save
+
+  // Logs one GPS vertex for the running search's track. A single getCurrentPosition() fix is
+  // enough per vertex (unlike the stop fix, which is sampled for accuracy) and doesn't touch
+  // sampleLocation()'s activeGpsStop singleton, so the two never collide. A failed/skipped fix
+  // just leaves a gap in the track, which is fine.
+  function logTrackPoint() {
+    if (!running || trackPoints.length >= TRACK_MAX_POINTS) return;
+    getLocation(
+      pos => {
+        trackPoints.push({
+          ms: Date.now() - startTs,
+          lat: +pos.coords.latitude.toFixed(5),
+          lon: +pos.coords.longitude.toFixed(5),
+          alt: pos.coords.altitude != null ? Math.round(pos.coords.altitude) : 0,
+          acc: pos.coords.accuracy != null ? Math.round(pos.coords.accuracy) : 0
+        });
+        updateTrackStatus();
+      },
+      () => {}
+    );
+  }
+
+  function updateTrackStatus() {
+    const el = $('trackStatus');
+    if (!el) return;
+    el.textContent = trackPoints.length
+      ? '📍 GPS log: ' + trackPoints.length + (trackPoints.length === 1 ? ' point' : ' points')
+      : '';
+  }
+
+  // Prepares a track for the ODK geotrace field: drop consecutive duplicate points, then trim
+  // trailing points equal to the first so the geotrace's first point != last point (a spec
+  // requirement). Returns [] if fewer than 2 distinct points remain.
+  function dedupeTrack(track) {
+    const out = [];
+    for (const p of track) {
+      const q = out[out.length - 1];
+      if (!q || q.lat !== p.lat || q.lon !== p.lon) out.push(p);
+    }
+    while (out.length >= 2 &&
+           out[0].lat === out[out.length - 1].lat &&
+           out[0].lon === out[out.length - 1].lon) {
+      out.pop();
+    }
+    return out.length >= 2 ? out : [];
+  }
 
   // Sampling GPS capture. getCurrentPosition() returns the first fix the platform has, which on
   // a cold start is often a coarse wifi/cell fix tens to hundreds of metres out; GNSS then keeps
@@ -944,7 +1006,9 @@
     if (!running) {
       running = true;
       startTs = Date.now();
+      trackPoints = [];
       startTiming();
+      logTrackPoint(); // start vertex (ms ~ 0)
     } else {
       running = false;
       lastElapsedMs = Date.now() - startTs;
@@ -1113,9 +1177,19 @@
       }
       gpsGateWarned = true;
     }
+    // End the track at the recorded stop fix, so the track's last point is exactly the record's
+    // location_lat/location_lon (unless the per-minute logger already captured a fix at ~stop).
+    if (pendingLat != null && (trackPoints.length === 0 ||
+        trackPoints[trackPoints.length - 1].ms < lastElapsedMs - 1000)) {
+      trackPoints.push({ ms: lastElapsedMs, lat: pendingLat, lon: pendingLon, alt: 0,
+                         acc: pendingAccuracy != null ? Math.round(pendingAccuracy) : 0 });
+    }
+    rec.track = trackPoints.slice();
     records.push(rec);
     saveRecords();
     stopGpsSample();
+    trackPoints = [];
+    updateTrackStatus();
     $('overlay').classList.remove('show');
     renderHistory();
     updateStatusBar();
@@ -1139,6 +1213,8 @@
 
   $('resetTimerBtn').addEventListener('click', () => {
     stopGpsSample();
+    trackPoints = [];
+    updateTrackStatus();
     $('discardOverlay').classList.remove('show');
     $('overlay').classList.remove('show');
     lastElapsedMs = 0;
@@ -1297,11 +1373,18 @@
     const m = FIELD_MAP;
     const root = FORM_ID;
     const instanceId = 'uuid:' + rec.id;
+    // ODK geotrace: "lat lon alt acc" per point, ";"-joined, no trailing ";", >=2 distinct points
+    // with first != last. search_track_seconds is ;-joined elapsed-seconds, index-aligned to it.
+    const tp = dedupeTrack(rec.track || []);
+    const trackGeo = tp.map(p => p.lat + ' ' + p.lon + ' ' + p.alt + ' ' + p.acc).join(';');
+    const trackSec = tp.map(p => Math.round(p.ms / 1000)).join(';');
     return `<?xml version="1.0" encoding="UTF-8"?>
 <${root} id="${root}">
   <${m.date}>${escXml(rec.meta.date)}</${m.date}>
   <${m.locationLat}>${rec.meta.locationLat != null ? rec.meta.locationLat : ''}</${m.locationLat}>
   <${m.locationLon}>${rec.meta.locationLon != null ? rec.meta.locationLon : ''}</${m.locationLon}>
+  <${m.searchTrack}>${trackGeo}</${m.searchTrack}>
+  <${m.searchTrackSeconds}>${trackSec}</${m.searchTrackSeconds}>
   <${m.team}>${escXml(rec.meta.team)}</${m.team}>
   <${m.startTime}>${escXml(rec.meta.startTime)}</${m.startTime}>
   <${m.recordNumber}>${rec.n}</${m.recordNumber}>

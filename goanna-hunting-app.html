@@ -749,7 +749,8 @@
   let tickHandle = null;
   let beepTimer = null;
   let trackTimer = null;
-  let trackPoints = [];   // [{ ms, lat, lon, alt, acc }] for the current search; ms = elapsed since startTs
+  let trackPoints = [];   // [{ ms, lat, lon, alt, acc }] for the current search; ms = elapsed since startTs.
+                          // lat/lon are stored full-precision — rounding/dedupe happen in prepareTrack() at save.
   let lastElapsedMs = 0;
   let people = null;
   let burntVal = null;
@@ -759,6 +760,8 @@
   let records = loadRecords();
   let pendingLat = null;
   let pendingLon = null;
+  let pendingLatRaw = null;     // full-precision copies of the stop fix, used only for the track's final vertex
+  let pendingLonRaw = null;
   let pendingAccuracy = null;   // metres; drives the live readout + soft gate only, never submitted
   let pendingGeoError = null;
   let geoWarned = false;        // "save without any location" prompt — once per session
@@ -840,13 +843,13 @@
 
   // Wraps getCurrentPosition with a sane timeout (there is none by default, so a stuck fix
   // could otherwise hang forever with neither callback ever firing) and high accuracy, since
-  // searches happen outdoors where that costs little. Used only for the passive page-load
-  // permission/hardware check — a search's real coordinates come from sampleLocation() below.
-  function getLocation(onSuccess, onError) {
+  // searches happen outdoors where that costs little. Used for the passive page-load
+  // permission/hardware check (default opts) and for track vertices (which pass looser opts) —
+  // a search's stored coordinates come from sampleLocation() below.
+  function getLocation(onSuccess, onError, opts) {
     if (!navigator.geolocation) { onError({ code: 0 }); return; }
-    navigator.geolocation.getCurrentPosition(onSuccess, onError, {
-      enableHighAccuracy: true, timeout: 8000, maximumAge: 0
-    });
+    navigator.geolocation.getCurrentPosition(onSuccess, onError,
+      opts || { enableHighAccuracy: true, timeout: 8000, maximumAge: 0 });
   }
 
   function geoErrorMessage(err) {
@@ -868,47 +871,59 @@
   // Logs one GPS vertex for the running search's track. A single getCurrentPosition() fix is
   // enough per vertex (unlike the stop fix, which is sampled for accuracy) and doesn't touch
   // sampleLocation()'s activeGpsStop singleton, so the two never collide. A failed/skipped fix
-  // just leaves a gap in the track, which is fine.
+  // just leaves a gap in the track, which is fine. lat/lon are stored full-precision (rounding
+  // happens in prepareTrack()); the opts here are looser than the page-load check — a per-minute
+  // breadcrumb can wait longer for a fix and a slightly stale one is fine, which cuts the silent
+  // timeouts that happen under tree canopy / on a cold start.
   function logTrackPoint() {
     if (!running || trackPoints.length >= TRACK_MAX_POINTS) return;
     getLocation(
       pos => {
         trackPoints.push({
           ms: Date.now() - startTs,
-          lat: +pos.coords.latitude.toFixed(5),
-          lon: +pos.coords.longitude.toFixed(5),
+          lat: pos.coords.latitude,
+          lon: pos.coords.longitude,
           alt: pos.coords.altitude != null ? Math.round(pos.coords.altitude) : 0,
           acc: pos.coords.accuracy != null ? Math.round(pos.coords.accuracy) : 0
         });
         updateTrackStatus();
       },
-      () => {}
+      () => {},
+      { enableHighAccuracy: true, timeout: 25000, maximumAge: 30000 }
     );
   }
 
   function updateTrackStatus() {
     const el = $('trackStatus');
     if (!el) return;
-    el.textContent = trackPoints.length
-      ? '📍 GPS log: ' + trackPoints.length + (trackPoints.length === 1 ? ' point' : ' points')
-      : '';
+    if (!trackPoints.length) { el.textContent = ''; return; }
+    const n = prepareTrack(trackPoints).length;
+    el.textContent = n >= 2
+      ? '📍 GPS log: ' + n + ' points'
+      : '📍 GPS log: stationary so far';
   }
 
-  // Prepares a track for the ODK geotrace field: drop consecutive duplicate points, then trim
-  // trailing points equal to the first so the geotrace's first point != last point (a spec
-  // requirement). Returns [] if fewer than 2 distinct points remain.
-  function dedupeTrack(track) {
+  // Prepares a track for the ODK geotrace field: round each vertex to 6 dp (~0.11 m, matching
+  // what ODK Collect emits), drop only EXACT consecutive duplicates (full-precision GPS jitter
+  // is always kept, so any real movement survives), then — since a geotrace requires the last
+  // point's lat/lon to differ from the first's — pop the last point if it exactly equals the
+  // first. Returns the surviving point objects (each keeps .ms for search_track_seconds); the
+  // result may have fewer than 2 points (a search with 0-1 successful fixes, or a truly
+  // stationary one), which callers treat as "no track".
+  function prepareTrack(track) {
+    const r6 = n => Math.round(n * 1e6) / 1e6;
     const out = [];
-    for (const p of track) {
+    for (const s of track) {
+      const p = { ms: s.ms, lat: r6(s.lat), lon: r6(s.lon), alt: s.alt || 0, acc: s.acc || 0 };
       const q = out[out.length - 1];
       if (!q || q.lat !== p.lat || q.lon !== p.lon) out.push(p);
     }
-    while (out.length >= 2 &&
-           out[0].lat === out[out.length - 1].lat &&
-           out[0].lon === out[out.length - 1].lon) {
+    if (out.length >= 2 &&
+        out[0].lat === out[out.length - 1].lat &&
+        out[0].lon === out[out.length - 1].lon) {
       out.pop();
     }
-    return out.length >= 2 ? out : [];
+    return out;
   }
 
   // Sampling GPS capture. getCurrentPosition() returns the first fix the platform has, which on
@@ -976,6 +991,8 @@
   function fetchSearchLocation() {
     pendingLat = null;
     pendingLon = null;
+    pendingLatRaw = null;
+    pendingLonRaw = null;
     pendingAccuracy = null;
     pendingGeoError = null;
     gpsSampling = true;
@@ -984,12 +1001,16 @@
       best => {   // onProgress — each improved fix
         pendingLat = +best.coords.latitude.toFixed(5);
         pendingLon = +best.coords.longitude.toFixed(5);
+        pendingLatRaw = best.coords.latitude;
+        pendingLonRaw = best.coords.longitude;
         pendingAccuracy = best.coords.accuracy;
         updateGpsStatus();
       },
       best => {   // onDone — target reached or window elapsed
         pendingLat = +best.coords.latitude.toFixed(5);
         pendingLon = +best.coords.longitude.toFixed(5);
+        pendingLatRaw = best.coords.latitude;
+        pendingLonRaw = best.coords.longitude;
         pendingAccuracy = best.coords.accuracy;
         gpsSampling = false;
         updateGpsStatus();
@@ -1177,11 +1198,12 @@
       }
       gpsGateWarned = true;
     }
-    // End the track at the recorded stop fix, so the track's last point is exactly the record's
-    // location_lat/location_lon (unless the per-minute logger already captured a fix at ~stop).
-    if (pendingLat != null && (trackPoints.length === 0 ||
+    // End the track at the recorded stop fix (full precision, so it survives prepareTrack's
+    // dedupe), matching the record's location_lat/location_lon unless the per-minute logger
+    // already captured a fix at ~stop.
+    if (pendingLatRaw != null && (trackPoints.length === 0 ||
         trackPoints[trackPoints.length - 1].ms < lastElapsedMs - 1000)) {
-      trackPoints.push({ ms: lastElapsedMs, lat: pendingLat, lon: pendingLon, alt: 0,
+      trackPoints.push({ ms: lastElapsedMs, lat: pendingLatRaw, lon: pendingLonRaw, alt: 0,
                          acc: pendingAccuracy != null ? Math.round(pendingAccuracy) : 0 });
     }
     rec.track = trackPoints.slice();
@@ -1240,6 +1262,7 @@
     list.innerHTML = records.slice().reverse().slice(0, 5).map(r => {
       const badgeClass = r.status === 'synced' ? 'synced' : (r.status === 'failed' ? 'failed' : 'pending');
       const badgeText = r.status === 'synced' ? 'Synced' : (r.status === 'failed' ? 'Failed — tap to retry' : 'Queued');
+      const trackN = Array.isArray(r.track) ? prepareTrack(r.track).length : null;
       return `
       <div class="record ${badgeClass}" data-id="${r.id}">
         <div class="rtop">
@@ -1247,6 +1270,7 @@
           <span class="badge ${badgeClass}">${badgeText}</span>
         </div>
         <div class="rmeta">${r.people} searching · burrow found: ${r.burrowFound || '—'}</div>
+        ${trackN != null ? `<div class="rmeta">${trackN >= 2 ? 'GPS track: ' + trackN + ' points' : 'GPS track: not recorded (stationary search)'}</div>` : ''}
         ${r.burrowFound === 'Yes' ? (r.dig === 'Yes'
           ? `<div class="rmeta">inspection: ${r.method} · ${escXml(foundSummary(r))}</div>`
           : `<div class="rmeta">not inspected</div>`) : ''}
@@ -1373,11 +1397,18 @@
     const m = FIELD_MAP;
     const root = FORM_ID;
     const instanceId = 'uuid:' + rec.id;
-    // ODK geotrace: "lat lon alt acc" per point, ";"-joined, no trailing ";", >=2 distinct points
-    // with first != last. search_track_seconds is ;-joined elapsed-seconds, index-aligned to it.
-    const tp = dedupeTrack(rec.track || []);
-    const trackGeo = tp.map(p => p.lat + ' ' + p.lon + ' ' + p.alt + ' ' + p.acc).join(';');
-    const trackSec = tp.map(p => Math.round(p.ms / 1000)).join(';');
+    // ODK geotrace: "lat lon alt acc" per point (6 dp lat/lon, ODK's lat-lon order), ";"-joined,
+    // no trailing ";". Needs >=2 points with first != last, which prepareTrack() enforces; a
+    // search with too few fixes (or a truly stationary one) yields <2 points and both fields go
+    // out empty — the record still carries location_lat/location_lon. search_track_seconds is
+    // ;-joined elapsed-seconds, index-aligned to search_track (same tp array mapped twice).
+    const tp = prepareTrack(rec.track || []);
+    const haveTrack = tp.length >= 2;
+    if (!haveTrack && (rec.track || []).length) {
+      console.warn('search_track omitted: fewer than 2 distinct GPS points for record #' + rec.n);
+    }
+    const trackGeo = haveTrack ? tp.map(p => p.lat + ' ' + p.lon + ' ' + p.alt + ' ' + p.acc).join(';') : '';
+    const trackSec = haveTrack ? tp.map(p => Math.round(p.ms / 1000)).join(';') : '';
     return `<?xml version="1.0" encoding="UTF-8"?>
 <${root} id="${root}">
   <${m.date}>${escXml(rec.meta.date)}</${m.date}>

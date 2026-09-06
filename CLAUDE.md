@@ -69,17 +69,29 @@ commented sections (search for the `// ---------- ... ----------` markers):
    - **Each search also records a GPS track**, not just the stop point — a fix at timer start, one
      per minute while running (`trackTimer`, alongside the beep interval), and the stop-sampler's
      fix as the last point. Points accumulate in the module-level `trackPoints` array
-     (`{ ms, lat, lon, alt, acc }`, `ms` = elapsed since `startTs`), reset on a fresh start and on
+     (`{ ms, lat, lon, alt, acc }`, `ms` = elapsed since `startTs`, **lat/lon stored
+     full-precision** — rounding happens only at serialisation), reset on a fresh start and on
      "reset timer", carried across a "continue timing" pause (leaving a gap). Each vertex is a
-     single `getLocation()` one-shot — a failed fix just leaves a gap. At save, `trackPoints` is
-     copied to `rec.track` and serialised by `buildSubmissionXml()` into two form fields:
-     `search_track` (ODK `geotrace`: `"lat lon alt acc"` per point, `;`-joined, **no trailing
-     `;`**, `dedupeTrack()` guarantees ≥2 points with first ≠ last, else empty) and
-     `search_track_seconds` (`;`-joined elapsed-seconds, index-aligned to `search_track`, since
-     geotrace carries no timestamps — needed downstream to spot a forgotten timer + drive to the
-     next site by segment speed). `location_lat`/`location_lon` are unchanged (still the
-     accuracy-gated stop fix); downstream uses `search_track`'s first point as the search-start
-     location. A small `#trackStatus` line on the timer card shows the running point count.
+     single `getLocation()` one-shot with a loose `opts` (`timeout: 25000`, `maximumAge: 30000` —
+     a per-minute breadcrumb can wait, and this cuts the silent timeouts that happen under tree
+     canopy / on a cold start); a failed fix just leaves a gap. At save, `trackPoints` is copied
+     to `rec.track` and serialised by `buildSubmissionXml()` into two form fields:
+     `search_track` (ODK `geotrace`: `"lat lon alt acc"` per point, lat/lon rounded to **6 dp**
+     — ~0.11 m, matching ODK Collect — `;`-joined, **no trailing `;`**) and `search_track_seconds`
+     (`;`-joined elapsed-seconds, index-aligned to `search_track` — same array mapped twice — since
+     geotrace carries no timestamps; needed downstream to spot a forgotten timer + drive to the
+     next site by segment speed). `prepareTrack()` (was `dedupeTrack()`) does the 6 dp rounding,
+     drops only **exact** consecutive duplicates (full-precision jitter is always kept, so any
+     real movement survives), and pops the last point once if it equals the first (geotrace needs
+     last ≠ first). If fewer than 2 points remain (a search with 0–1 successful fixes, or a
+     genuinely stationary one — a spec-valid geotrace is then impossible), **both fields go out
+     empty**; the record still carries `location_lat`/`location_lon`, so the downstream ETL must
+     fall back to those for the search-start location when `search_track` is empty.
+     `location_lat`/`location_lon` are unchanged (still the accuracy-gated stop fix, 5 dp); when
+     `search_track` is present, downstream uses its first point as the search-start location. A
+     `#trackStatus` line on the timer card and a line per record in the history list both show the
+     post-`prepareTrack` point count (`"stationary so far"` / `"not recorded (stationary search)"`
+     when < 2), not the raw fix count.
    - Since a blank location has real consequences here, the app also proactively surfaces GPS
      trouble rather than staying silent about it: `getLocation()` is called once on page load and
      alerts (via `geoErrorMessage()`) if it fails, and `$('saveBtn')` alerts again — with a real
@@ -132,8 +144,10 @@ commented sections (search for the `// ---------- ... ----------` markers):
    username/password. The instance is hand-written, so anything with a non-trivial serialisation
    is encoded here rather than by an XForms engine: `select_multiple` is space-joined; the
    `search_track` `geotrace` is `"lat lon alt acc"` per point (ODK's `lat lon` order, **not**
-   GeoJSON's), points `;`-joined with no trailing `;`, and needs ≥2 points with first ≠ last or
-   it's spec-invalid (`dedupeTrack()` enforces this, emitting empty otherwise).
+   GeoJSON's, lat/lon at 6 dp), points `;`-joined with no trailing `;`, and needs ≥2 points with
+   first ≠ last or it's spec-invalid (`prepareTrack()` rounds + dedupes to enforce this, emitting
+   an empty `search_track`/`search_track_seconds` pair when < 2 points remain — see the GPS-track
+   bullet in section 2).
    If you add a form field, place its element in `buildSubmissionXml()` to match its position in
    the `survey` sheet and re-validate the XLSForm: `pip install pyxform` in a throwaway venv, then
    `xls2xform goanna_burrow_detection.xlsx /tmp/check.xml` — a clean "Conversion complete!" means

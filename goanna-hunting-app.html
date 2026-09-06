@@ -220,6 +220,11 @@
     color: var(--muted);
     margin-top: 10px;
   }
+  #trackStatus {
+    margin-top: 4px;
+    font-variant-numeric: tabular-nums;
+  }
+  #trackStatus:empty { display: none; }
 
   #history h2 {
     font-size: 11px;
@@ -303,6 +308,13 @@
     color: var(--muted);
     margin-bottom: 16px;
   }
+  #gpsStatus {
+    font-size: 12.5px;
+    color: var(--muted);
+    margin: -12px 0 16px;
+    min-height: 1.1em;
+  }
+  #gpsStatus.warn { color: var(--warn); }
   .stepper {
     display: flex;
     align-items: center;
@@ -484,6 +496,7 @@
         </div>
         <button id="bigBtn">Start search</button>
         <div class="hint" id="hintText">Hit start when the search begins.</div>
+        <div class="hint" id="trackStatus"></div>
       </div>
     </div>
 
@@ -503,6 +516,7 @@
   <div class="sheet" id="sheet">
     <h3>Search complete — <span id="modalDur">00:00</span></h3>
     <div class="sub">A few quick details before the next search.</div>
+    <div id="gpsStatus"></div>
 
     <div class="field">
       <label>How many people were searching?</label>
@@ -583,16 +597,6 @@
     <div class="sub">Point this app at your KoboToolbox or ODK Central form.</div>
 
     <div class="field">
-      <label>Native title area</label>
-      <select id="cfgNta">
-        <option value="none">Not on a native title area</option>
-        <option value="NTA-KJ">Karajarri</option>
-        <option value="NTA-NYKJ">Nyangumarta-Karajarri shared country</option>
-        <option value="NTA-NY">Nyangumarta</option>
-      </select>
-    </div>
-
-    <div class="field">
       <label>Hunting team names</label>
       <input type="text" id="cfgTeam" placeholder="e.g. J. Nangala, T. Watson">
     </div>
@@ -654,7 +658,8 @@
     date: 'date',
     locationLat: 'location_lat',
     locationLon: 'location_lon',
-    nativeTitleArea: 'native_title_area',
+    searchTrack: 'search_track',
+    searchTrackSeconds: 'search_track_seconds',
     team: 'hunting_team_names',
     startTime: 'start_time',
     recordNumber: 'record_number',
@@ -683,8 +688,7 @@
   let settings = {
     appUserCode: '',
     submissionUrl: '',
-    team: '',
-    nativeTitleArea: 'none'
+    team: ''
   };
 
   function loadSettings() {
@@ -744,6 +748,8 @@
   let startTs = null;
   let tickHandle = null;
   let beepTimer = null;
+  let trackTimer = null;
+  let trackPoints = [];   // [{ ms, lat, lon, alt, acc }] for the current search; ms = elapsed since startTs
   let lastElapsedMs = 0;
   let people = null;
   let burntVal = null;
@@ -753,8 +759,11 @@
   let records = loadRecords();
   let pendingLat = null;
   let pendingLon = null;
+  let pendingAccuracy = null;   // metres; drives the live readout + soft gate only, never submitted
   let pendingGeoError = null;
-  let geoWarned = false;
+  let geoWarned = false;        // "save without any location" prompt — once per session
+  let gpsGateWarned = false;    // "best fix was poor, save anyway" prompt — once per session
+  let gpsSampling = false;
   let wakeLock = null;
   let audioCtx = null;
 
@@ -812,12 +821,15 @@
     tickHandle = setInterval(tick, 250);
     beep();
     beepTimer = setInterval(beep, 60000);
+    trackTimer = setInterval(logTrackPoint, TRACK_INTERVAL_MS);
+    updateTrackStatus();
     requestWakeLock();
   }
 
   function stopTiming() {
     clearInterval(tickHandle); tickHandle = null;
     clearInterval(beepTimer); beepTimer = null;
+    clearInterval(trackTimer); trackTimer = null;
     releaseWakeLock();
     $('bigBtn').textContent = 'Start search';
     $('bigBtn').classList.remove('running');
@@ -828,7 +840,8 @@
 
   // Wraps getCurrentPosition with a sane timeout (there is none by default, so a stuck fix
   // could otherwise hang forever with neither callback ever firing) and high accuracy, since
-  // searches happen outdoors where that costs little.
+  // searches happen outdoors where that costs little. Used only for the passive page-load
+  // permission/hardware check — a search's real coordinates come from sampleLocation() below.
   function getLocation(onSuccess, onError) {
     if (!navigator.geolocation) { onError({ code: 0 }); return; }
     navigator.geolocation.getCurrentPosition(onSuccess, onError, {
@@ -845,13 +858,147 @@
     }
   }
 
+  const GPS_TARGET_ACCURACY_M = 10;    // stop sampling once the fix is at least this good
+  const GPS_SAMPLE_MAX_MS     = 45000; // ...otherwise stop trying to improve it after this long
+  const GPS_GATE_WARN_M       = 25;    // warn (but don't block) if the best fix is worse than this
+
+  const TRACK_INTERVAL_MS = 60000; // one track fix per minute while the timer runs
+  const TRACK_MAX_POINTS  = 1000;  // backstop (~16h) — records re-serialise in full on every save
+
+  // Logs one GPS vertex for the running search's track. A single getCurrentPosition() fix is
+  // enough per vertex (unlike the stop fix, which is sampled for accuracy) and doesn't touch
+  // sampleLocation()'s activeGpsStop singleton, so the two never collide. A failed/skipped fix
+  // just leaves a gap in the track, which is fine.
+  function logTrackPoint() {
+    if (!running || trackPoints.length >= TRACK_MAX_POINTS) return;
+    getLocation(
+      pos => {
+        trackPoints.push({
+          ms: Date.now() - startTs,
+          lat: +pos.coords.latitude.toFixed(5),
+          lon: +pos.coords.longitude.toFixed(5),
+          alt: pos.coords.altitude != null ? Math.round(pos.coords.altitude) : 0,
+          acc: pos.coords.accuracy != null ? Math.round(pos.coords.accuracy) : 0
+        });
+        updateTrackStatus();
+      },
+      () => {}
+    );
+  }
+
+  function updateTrackStatus() {
+    const el = $('trackStatus');
+    if (!el) return;
+    el.textContent = trackPoints.length
+      ? '📍 GPS log: ' + trackPoints.length + (trackPoints.length === 1 ? ' point' : ' points')
+      : '';
+  }
+
+  // Prepares a track for the ODK geotrace field: drop consecutive duplicate points, then trim
+  // trailing points equal to the first so the geotrace's first point != last point (a spec
+  // requirement). Returns [] if fewer than 2 distinct points remain.
+  function dedupeTrack(track) {
+    const out = [];
+    for (const p of track) {
+      const q = out[out.length - 1];
+      if (!q || q.lat !== p.lat || q.lon !== p.lon) out.push(p);
+    }
+    while (out.length >= 2 &&
+           out[0].lat === out[out.length - 1].lat &&
+           out[0].lon === out[out.length - 1].lon) {
+      out.pop();
+    }
+    return out.length >= 2 ? out : [];
+  }
+
+  // Sampling GPS capture. getCurrentPosition() returns the first fix the platform has, which on
+  // a cold start is often a coarse wifi/cell fix tens to hundreds of metres out; GNSS then keeps
+  // improving for 30-60s. So instead of one fix, watch for up to GPS_SAMPLE_MAX_MS, keep the
+  // smallest-accuracy reading seen, and stop early once it's within GPS_TARGET_ACCURACY_M.
+  // onProgress fires on every improved fix (for the live "±N m" readout); onDone fires once with
+  // the best Position; onError fires only if no fix ever arrived. Returns stop(abort) — stop()
+  // finishes early with the best fix so far, stop(true) aborts silently (sheet closed).
+  let activeGpsStop = null;
+  function sampleLocation(onProgress, onDone, onError) {
+    if (activeGpsStop) activeGpsStop(true);
+    if (!navigator.geolocation) { onError({ code: 0 }); return () => {}; }
+    let best = null, settled = false;
+    const stop = (abort) => {
+      if (settled) return;
+      settled = true;
+      navigator.geolocation.clearWatch(id);
+      clearTimeout(timer);
+      if (activeGpsStop === stop) activeGpsStop = null;
+      if (abort) return;
+      if (best) onDone(best); else onError({ code: 3 });
+    };
+    const id = navigator.geolocation.watchPosition(
+      pos => {
+        if (!best || pos.coords.accuracy < best.coords.accuracy) best = pos;
+        onProgress(best);
+        if (best.coords.accuracy <= GPS_TARGET_ACCURACY_M) stop();
+      },
+      // A transient watch error after we already have a fix shouldn't discard a good sample.
+      err => { if (!best) { settled = true; clearTimeout(timer); if (activeGpsStop === stop) activeGpsStop = null; onError(err); } },
+      { enableHighAccuracy: true, timeout: GPS_SAMPLE_MAX_MS, maximumAge: 0 }
+    );
+    const timer = setTimeout(() => stop(), GPS_SAMPLE_MAX_MS);
+    activeGpsStop = stop;
+    return stop;
+  }
+
+  // Reflects the current sample's progress in the record sheet's #gpsStatus line.
+  function updateGpsStatus() {
+    const el = $('gpsStatus');
+    if (!el) return;
+    el.classList.remove('warn');
+    if (pendingGeoError) { el.textContent = geoErrorMessage(pendingGeoError); return; }
+    if (pendingAccuracy == null) {
+      el.textContent = gpsSampling ? 'Getting GPS fix…' : '';
+      return;
+    }
+    const acc = Math.round(pendingAccuracy);
+    if (gpsSampling) {
+      el.textContent = 'Improving GPS fix… ±' + acc + ' m (waiting for ±' + GPS_TARGET_ACCURACY_M + ' m)';
+    } else if (pendingAccuracy > GPS_GATE_WARN_M) {
+      el.classList.add('warn');
+      el.textContent = '⚠ Best GPS fix was only ±' + acc + ' m — stand in the open with a clear view of the sky.';
+    } else {
+      el.textContent = 'GPS fix ±' + acc + ' m';
+    }
+  }
+
+  function stopGpsSample() {
+    if (activeGpsStop) activeGpsStop(true);
+    gpsSampling = false;
+  }
+
   function fetchSearchLocation() {
     pendingLat = null;
     pendingLon = null;
+    pendingAccuracy = null;
     pendingGeoError = null;
-    getLocation(
-      pos => { pendingLat = +pos.coords.latitude.toFixed(5); pendingLon = +pos.coords.longitude.toFixed(5); },
-      err => { pendingGeoError = err; }
+    gpsSampling = true;
+    updateGpsStatus();
+    sampleLocation(
+      best => {   // onProgress — each improved fix
+        pendingLat = +best.coords.latitude.toFixed(5);
+        pendingLon = +best.coords.longitude.toFixed(5);
+        pendingAccuracy = best.coords.accuracy;
+        updateGpsStatus();
+      },
+      best => {   // onDone — target reached or window elapsed
+        pendingLat = +best.coords.latitude.toFixed(5);
+        pendingLon = +best.coords.longitude.toFixed(5);
+        pendingAccuracy = best.coords.accuracy;
+        gpsSampling = false;
+        updateGpsStatus();
+      },
+      err => {    // onError — no fix at all
+        pendingGeoError = err;
+        gpsSampling = false;
+        updateGpsStatus();
+      }
     );
   }
 
@@ -859,7 +1006,9 @@
     if (!running) {
       running = true;
       startTs = Date.now();
+      trackPoints = [];
       startTiming();
+      logTrackPoint(); // start vertex (ms ~ 0)
     } else {
       running = false;
       lastElapsedMs = Date.now() - startTs;
@@ -875,6 +1024,7 @@
 
   function openModal() {
     $('modalDur').textContent = fmt(lastElapsedMs);
+    updateGpsStatus();
     people = null; $('peopleVal').textContent = '–'; $('minusP').disabled = true;
     burntVal = null;
     document.querySelectorAll('.burntBtn').forEach(b => b.classList.remove('active','yes','no'));
@@ -998,7 +1148,6 @@
         startTime: started.toTimeString().slice(0,5),
         locationLat: pendingLat,
         locationLon: pendingLon,
-        nativeTitleArea: settings.nativeTitleArea || 'none',
         team: settings.team || ''
       },
       status: 'pending',   // pending | synced | failed
@@ -1016,8 +1165,31 @@
       }
       geoWarned = true;
     }
+    if (rec.meta.locationLat != null && pendingAccuracy != null &&
+        pendingAccuracy > GPS_GATE_WARN_M && !gpsGateWarned) {
+      const proceed = confirm(
+        'The best GPS fix for this search was only ±' + Math.round(pendingAccuracy) +
+        ' m. Save the record with these coordinates anyway, and stop asking for the rest of this session?'
+      );
+      if (!proceed) {
+        if (!gpsSampling) fetchSearchLocation(); // try again for a sharper fix; sheet stays open
+        return;
+      }
+      gpsGateWarned = true;
+    }
+    // End the track at the recorded stop fix, so the track's last point is exactly the record's
+    // location_lat/location_lon (unless the per-minute logger already captured a fix at ~stop).
+    if (pendingLat != null && (trackPoints.length === 0 ||
+        trackPoints[trackPoints.length - 1].ms < lastElapsedMs - 1000)) {
+      trackPoints.push({ ms: lastElapsedMs, lat: pendingLat, lon: pendingLon, alt: 0,
+                         acc: pendingAccuracy != null ? Math.round(pendingAccuracy) : 0 });
+    }
+    rec.track = trackPoints.slice();
     records.push(rec);
     saveRecords();
+    stopGpsSample();
+    trackPoints = [];
+    updateTrackStatus();
     $('overlay').classList.remove('show');
     renderHistory();
     updateStatusBar();
@@ -1030,6 +1202,7 @@
   });
 
   $('continueTimingBtn').addEventListener('click', () => {
+    stopGpsSample(); // a fresh fix is taken when the timer is stopped again
     $('discardOverlay').classList.remove('show');
     $('overlay').classList.remove('show');
     running = true;
@@ -1039,6 +1212,9 @@
   });
 
   $('resetTimerBtn').addEventListener('click', () => {
+    stopGpsSample();
+    trackPoints = [];
+    updateTrackStatus();
     $('discardOverlay').classList.remove('show');
     $('overlay').classList.remove('show');
     lastElapsedMs = 0;
@@ -1088,7 +1264,6 @@
 
   // ---------- Settings sheet ----------
   function populateSettingsForm() {
-    $('cfgNta').value = settings.nativeTitleArea || 'none';
     $('cfgTeam').value = settings.team || '';
     $('cfgUrl').value = settings.appUserCode || settings.submissionUrl;
   }
@@ -1107,7 +1282,6 @@
       alert(err.message);
       return;
     }
-    settings.nativeTitleArea = $('cfgNta').value;
     settings.team = $('cfgTeam').value.trim();
     settings.appUserCode = rawInput;
     settings.submissionUrl = resolvedUrl;
@@ -1118,6 +1292,7 @@
 
   $('overlay').addEventListener('click', (e) => {
     if (e.target !== $('overlay')) return;
+    stopGpsSample();
     $('overlay').classList.remove('show');
   });
   $('settingsOverlay').addEventListener('click', (e) => {
@@ -1198,12 +1373,18 @@
     const m = FIELD_MAP;
     const root = FORM_ID;
     const instanceId = 'uuid:' + rec.id;
+    // ODK geotrace: "lat lon alt acc" per point, ";"-joined, no trailing ";", >=2 distinct points
+    // with first != last. search_track_seconds is ;-joined elapsed-seconds, index-aligned to it.
+    const tp = dedupeTrack(rec.track || []);
+    const trackGeo = tp.map(p => p.lat + ' ' + p.lon + ' ' + p.alt + ' ' + p.acc).join(';');
+    const trackSec = tp.map(p => Math.round(p.ms / 1000)).join(';');
     return `<?xml version="1.0" encoding="UTF-8"?>
 <${root} id="${root}">
   <${m.date}>${escXml(rec.meta.date)}</${m.date}>
   <${m.locationLat}>${rec.meta.locationLat != null ? rec.meta.locationLat : ''}</${m.locationLat}>
   <${m.locationLon}>${rec.meta.locationLon != null ? rec.meta.locationLon : ''}</${m.locationLon}>
-  <${m.nativeTitleArea}>${escXml(rec.meta.nativeTitleArea)}</${m.nativeTitleArea}>
+  <${m.searchTrack}>${trackGeo}</${m.searchTrack}>
+  <${m.searchTrackSeconds}>${trackSec}</${m.searchTrackSeconds}>
   <${m.team}>${escXml(rec.meta.team)}</${m.team}>
   <${m.startTime}>${escXml(rec.meta.startTime)}</${m.startTime}>
   <${m.recordNumber}>${rec.n}</${m.recordNumber}>

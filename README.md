@@ -39,15 +39,17 @@ can finish setting itself up for offline use — after that it'll launch instant
 4. Tap **Save settings**.
 
 If your phone asks for camera or location permission the first time you use the QR scanner or
-start a hunt, allow it — the camera is only used to read the QR code, and location is only used to
-tag each record with GPS coordinates.
+start a search, allow it — the camera is only used to read the QR code, and location is used to
+tag each record with GPS coordinates and to log the search track.
 
 ## Using it in the field
 
-- Tap **Start hunting** to begin a session — this captures the date, time and GPS location
-  automatically.
-- Use the timer to record each burrow search as normal.
-- Tap **Finish hunting** when you're done for the day.
+- Tap **Start search** when you begin searching a burrow, **Stop search** when you finish. Each
+  search is its own record — there's no "start/finish hunting" step.
+- After you stop, fill in the few quick details (people searching, burnt area, burrow found, what
+  you found) and tap **Save record**.
+- While the timer runs the app logs a GPS breadcrumb — a fix when you start, one each minute, and
+  one when you stop — so keep your phone on you (not zipped in a bag) for a clean track.
 - Records sync automatically whenever you have signal (or tap **Sync now**). Nothing is lost if
   you're offline — everything queues on the phone until it can sync.
 

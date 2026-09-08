@@ -132,9 +132,16 @@ commented sections (search for the `// ---------- ... ----------` markers):
    consistent with every submission recorded before this distinction existed) before asking how
    (`method`: `camera` or `dig`, maps to a separate new `inspection_method` field, only asked if
    inspected) and what was found (`found`, asked either way a burrow was inspected, since camera
-   inspection is more likely to yield "nothing" than digging). Records are pushed to `records`,
-   saved to `localStorage` immediately, then a sync is attempted. Tapping a non-synced record in
-   the history list retries it individually via `submitOne()`.
+   inspection is more likely to yield "nothing" than digging). When a burrow was found it also asks
+   its type (`burrowType`, maps to `burrow_type`: `wandidji` / `wanggali` / `other` — the burrows
+   of the spiny-tailed and sand goannas — with a `burrow_type_other` free-text box shown only for
+   `other`; unlike every other button group this one **defaults to `wandidji`** rather than
+   starting `null`, since that's the overwhelmingly common type, so it needs no "please select"
+   validation). A free-text `notes` field sits at the bottom of the sheet and is **always shown**,
+   regardless of whether a burrow was found — it's the catch-all for observations that don't fit a
+   category. Records are pushed to `records`, saved to `localStorage` immediately, then a sync is
+   attempted. Tapping a non-synced record in the history list retries it individually via
+   `submitOne()`.
 5. **XForms/OpenRosa submission** — `buildSubmissionXml(rec)` renders a record as an OpenRosa XML
    instance using the fixed `FIELD_MAP` constant to map internal field names to the target form's
    XML element names (there's no user-facing way to remap these — they must match

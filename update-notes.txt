@@ -16,3 +16,7 @@ We have field-tested the app.  Some important issues came up around usability.
 
 7. Photos.  One user suggested that we might want to take photos of each burrow.  I am less convinced this is necessary, and will add a large burden to the data being synced.  Still, I am interested to know if photo upload is an option with ODK Central.
 
+8. For each burrow found, record the burrow type: Wandidji (V. acanthurus), Wanggali (V. gouldii), or Other, with a free-text box opening for Other and Wandidji as the default.
+
+9. Add a free-text notes field to capture the various non-category things that come up during a search.
+

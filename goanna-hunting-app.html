@@ -338,6 +338,7 @@
     text-align: center;
   }
   .toggle2 { display: flex; gap: 8px; }
+  .toggle2.stack { flex-direction: column; }
   .toggle2 button {
     flex: 1;
     padding: 10px;
@@ -366,7 +367,7 @@
     cursor: pointer;
   }
   .chkopt input { width: 17px; height: 17px; accent-color: var(--olive); }
-  #foundOtherText { margin-top: 8px; }
+  #foundOtherText, #burrowTypeOtherText { margin-top: 8px; }
   #saveBtn, #saveSettingsBtn {
     width: 100%;
     margin-top: 18px;
@@ -543,6 +544,16 @@
       </div>
     </div>
 
+    <div class="field hidden" id="burrowTypeFieldWrap">
+      <label>What type of burrow?</label>
+      <div class="toggle2 stack">
+        <button type="button" class="burrowTypeBtn" data-val="wandidji">Wandidji (V. acanthurus)</button>
+        <button type="button" class="burrowTypeBtn" data-val="wanggali">Wanggali (V. gouldii)</button>
+        <button type="button" class="burrowTypeBtn" data-val="other">Other</button>
+      </div>
+      <input type="text" id="burrowTypeOtherText" class="hidden" placeholder="Please specify">
+    </div>
+
     <div class="field hidden" id="inspectedFieldWrap">
       <label>Was the burrow inspected?</label>
       <div class="toggle2">
@@ -571,6 +582,11 @@
         <label class="chkopt"><input type="checkbox" class="foundChk" value="other"> Other</label>
       </div>
       <input type="text" id="foundOtherText" class="hidden" placeholder="Please specify">
+    </div>
+
+    <div class="field">
+      <label>Notes</label>
+      <textarea id="notesText" rows="3" placeholder="Anything else worth recording"></textarea>
     </div>
 
     <div class="saveRow">
@@ -667,10 +683,13 @@
     peopleSearching: 'people_searching',
     burntArea: 'burnt_area',
     burrowFound: 'burrow_found',
+    burrowType: 'burrow_type',
+    burrowTypeOther: 'burrow_type_other',
     digInspect: 'dig_or_inspect',
     inspectionMethod: 'inspection_method',
     found: 'what_did_you_find',
-    foundOther: 'what_did_you_find_other'
+    foundOther: 'what_did_you_find_other',
+    notes: 'notes'
   };
 
   const FOUND_LABELS = {
@@ -680,6 +699,12 @@
     northern_bluetongue: 'Northern blue tongue (black one)',
     centralian_bluetongue: 'Centralian blue tongue (yellow one)',
     king_brown: 'King Brown',
+    other: 'Other'
+  };
+
+  const BURROW_TYPE_LABELS = {
+    wandidji: 'Wandidji',
+    wanggali: 'Wanggali',
     other: 'Other'
   };
 
@@ -755,6 +780,7 @@
   let people = null;
   let burntVal = null;
   let burrowFoundVal = null;
+  let burrowTypeVal = 'wandidji';   // only submitted when burrowFoundVal === 'Yes'; defaults to Wandidji
   let inspectedVal = null;
   let methodVal = null;
   let records = loadRecords();
@@ -1051,6 +1077,8 @@
     document.querySelectorAll('.burntBtn').forEach(b => b.classList.remove('active','yes','no'));
     burrowFoundVal = null;
     document.querySelectorAll('.burrowFoundBtn').forEach(b => b.classList.remove('active','yes','no'));
+    $('burrowTypeFieldWrap').classList.add('hidden');
+    resetBurrowType();
     inspectedVal = null;
     document.querySelectorAll('.inspectedBtn').forEach(b => b.classList.remove('active','yes','no'));
     methodVal = null;
@@ -1058,6 +1086,7 @@
     document.querySelectorAll('.foundChk').forEach(c => c.checked = false);
     $('foundOtherText').value = '';
     $('foundOtherText').classList.add('hidden');
+    $('notesText').value = '';
     $('inspectedFieldWrap').classList.add('hidden');
     $('digFieldWrap').classList.add('hidden');
     $('foundFieldWrap').classList.add('hidden');
@@ -1083,6 +1112,14 @@
     });
   });
 
+  function resetBurrowType() {
+    burrowTypeVal = 'wandidji';
+    document.querySelectorAll('.burrowTypeBtn').forEach(b =>
+      b.classList.toggle('active', b.dataset.val === 'wandidji'));
+    $('burrowTypeOtherText').value = '';
+    $('burrowTypeOtherText').classList.add('hidden');
+  }
+
   function hideMethodAndFound() {
     $('digFieldWrap').classList.add('hidden');
     methodVal = null;
@@ -1099,13 +1136,27 @@
       burrowFoundVal = btn.dataset.val;
       btn.classList.add('active', burrowFoundVal === 'Yes' ? 'yes' : 'no');
       if (burrowFoundVal === 'Yes') {
+        $('burrowTypeFieldWrap').classList.remove('hidden');
         $('inspectedFieldWrap').classList.remove('hidden');
       } else {
+        $('burrowTypeFieldWrap').classList.add('hidden');
+        resetBurrowType();
         $('inspectedFieldWrap').classList.add('hidden');
         inspectedVal = null;
         document.querySelectorAll('.inspectedBtn').forEach(b => b.classList.remove('active','yes','no'));
         hideMethodAndFound();
       }
+    });
+  });
+
+  document.querySelectorAll('.burrowTypeBtn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.burrowTypeBtn').forEach(b => b.classList.remove('active'));
+      burrowTypeVal = btn.dataset.val;
+      btn.classList.add('active');
+      const isOther = burrowTypeVal === 'other';
+      $('burrowTypeOtherText').classList.toggle('hidden', !isOther);
+      if (!isOther) $('burrowTypeOtherText').value = '';
     });
   });
 
@@ -1151,6 +1202,9 @@
       ? Array.from(document.querySelectorAll('.foundChk:checked')).map(c => c.value)
       : [];
     const foundOther = (burrowFoundVal === 'Yes' && inspectedVal === 'Yes') ? $('foundOtherText').value.trim() : '';
+    const burrowType = burrowFoundVal === 'Yes' ? burrowTypeVal : '';
+    const burrowTypeOther = (burrowFoundVal === 'Yes' && burrowTypeVal === 'other') ? $('burrowTypeOtherText').value.trim() : '';
+    const notes = $('notesText').value.trim();
     const started = new Date(startTs);
     const rec = {
       id: newId(),
@@ -1160,10 +1214,13 @@
       people,
       burnt: burntVal,
       burrowFound: burrowFoundVal,
+      burrowType,
+      burrowTypeOther,
       dig,
       method,
       found,
       foundOther,
+      notes,
       meta: {
         date: started.toISOString().slice(0,10),
         startTime: started.toTimeString().slice(0,5),
@@ -1252,6 +1309,11 @@
     return labels.join(', ');
   }
 
+  function burrowTypeSummary(rec) {
+    if (rec.burrowType === 'other') return rec.burrowTypeOther || 'Other';
+    return BURROW_TYPE_LABELS[rec.burrowType] || rec.burrowType;
+  }
+
   function renderHistory() {
     $('countBadge').textContent = records.length;
     const list = $('historyList');
@@ -1269,7 +1331,7 @@
           <span>Record #${r.n} <span class="dur">${r.duration}</span></span>
           <span class="badge ${badgeClass}">${badgeText}</span>
         </div>
-        <div class="rmeta">${r.people} searching · burrow found: ${r.burrowFound || '—'}</div>
+        <div class="rmeta">${r.people} searching · burrow found: ${r.burrowFound || '—'}${r.burrowFound === 'Yes' && r.burrowType ? ' (' + escXml(burrowTypeSummary(r)) + ')' : ''}</div>
         ${trackN != null ? `<div class="rmeta">${trackN >= 2 ? 'GPS track: ' + trackN + ' points' : 'GPS track: not recorded (stationary search)'}</div>` : ''}
         ${r.burrowFound === 'Yes' ? (r.dig === 'Yes'
           ? `<div class="rmeta">inspection: ${r.method} · ${escXml(foundSummary(r))}</div>`
@@ -1423,10 +1485,13 @@
   <${m.peopleSearching}>${rec.people}</${m.peopleSearching}>
   <${m.burntArea}>${escXml(rec.burnt)}</${m.burntArea}>
   <${m.burrowFound}>${escXml(rec.burrowFound)}</${m.burrowFound}>
+  <${m.burrowType}>${escXml(rec.burrowType || '')}</${m.burrowType}>
+  <${m.burrowTypeOther}>${escXml(rec.burrowTypeOther || '')}</${m.burrowTypeOther}>
   <${m.digInspect}>${escXml(rec.dig)}</${m.digInspect}>
   <${m.inspectionMethod}>${escXml(rec.method)}</${m.inspectionMethod}>
   <${m.found}>${escXml((rec.found || []).join(' '))}</${m.found}>
   <${m.foundOther}>${escXml(rec.foundOther || '')}</${m.foundOther}>
+  <${m.notes}>${escXml(rec.notes || '')}</${m.notes}>
   <meta><instanceID>${instanceId}</instanceID></meta>
 </${root}>`;
   }

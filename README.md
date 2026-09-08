@@ -46,8 +46,8 @@ tag each record with GPS coordinates and to log the search track.
 
 - Tap **Start search** when you begin searching a burrow, **Stop search** when you finish. Each
   search is its own record — there's no "start/finish hunting" step.
-- After you stop, fill in the few quick details (people searching, burnt area, burrow found, what
-  you found) and tap **Save record**.
+- After you stop, fill in the few quick details (people searching, burnt area, burrow found and —
+  if so — its type, what you found, plus any notes) and tap **Save record**.
 - While the timer runs the app logs a GPS breadcrumb — a fix when you start, one each minute, and
   one when you stop — so keep your phone on you (not zipped in a bag) for a clean track.
 - Records sync automatically whenever you have signal (or tap **Sync now**). Nothing is lost if

@@ -49,7 +49,10 @@ commented sections (search for the `// ---------- ... ----------` markers):
    (`$('bigBtn')`'s stop branch, via `fetchSearchLocation()`) kicks off a non-blocking GPS
    capture for *that search's* fix, then opens the record-entry sheet. `$('saveBtn')` builds each
    record's `meta` object fresh at save time: `date`/`startTime` derived from that search's
-   `startTs`, `locationLat`/`locationLon` from the just-resolved GPS fix, and `team` read directly
+   `startTs` (both **device-local** — `date` via `localDate()`, not `toISOString()`, which gave
+   the UTC date and so the previous day for searches before 08:00 WA time; fixed 2026-09-23,
+   earlier submissions keep the UTC date), `locationLat`/`locationLon` from the just-resolved
+   GPS fix, and `team` read directly
    from `settings` (still captured once in Settings, since it rarely changes between searches even
    though location now does).
    - **GPS capture is a sampler, not a single fix.** `getCurrentPosition()` returns the first fix

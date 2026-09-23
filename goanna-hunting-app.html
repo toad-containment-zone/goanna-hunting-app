@@ -796,6 +796,12 @@
   let wakeLock = null;
   let audioCtx = null;
 
+  // Local calendar date (YYYY-MM-DD) on the device's clock. Not toISOString().slice(0,10), which
+  // is the UTC date — the previous day for anything before 08:00 in WA.
+  function localDate(d) {
+    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+  }
+
   function fmt(ms) {
     const total = Math.floor(ms/1000);
     const m = Math.floor(total/60).toString().padStart(2,'0');
@@ -1222,7 +1228,7 @@
       foundOther,
       notes,
       meta: {
-        date: started.toISOString().slice(0,10),
+        date: localDate(started),
         startTime: started.toTimeString().slice(0,5),
         locationLat: pendingLat,
         locationLon: pendingLon,
